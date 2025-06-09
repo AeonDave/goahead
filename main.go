@@ -21,33 +21,28 @@ import (
 
 const version = "1.0.0"
 
-// UserFunction represents a user-defined function
 type UserFunction struct {
 	Name       string
-	InputTypes []string // Input parameters
+	InputTypes []string
 	OutputType string
 	FilePath   string
 }
 
-// ProcessorContext contains the processing context
 type ProcessorContext struct {
 	Functions   map[string]*UserFunction
 	FileSet     *token.FileSet
 	CurrentFile string
-	FuncFiles   []string // List of function files found
+	FuncFiles   []string
 	TempDir     string
 }
 
 func main() {
-	// Detect if we're being used as toolexec
 	if len(os.Args) >= 2 && !strings.HasPrefix(os.Args[1], "-") &&
 		(strings.Contains(os.Args[1], "compile") || strings.Contains(os.Args[1], "link") || strings.Contains(os.Args[1], "asm")) {
-		// We're being used as toolexec wrapper
 		runAsToolexec()
 		return
 	}
 
-	// Parse flags for standalone mode
 	var (
 		dir     = flag.String("dir", ".", "Directory to process")
 		verbose = flag.Bool("verbose", false, "Enable verbose output")
@@ -66,7 +61,6 @@ func main() {
 		return
 	}
 
-	// Run in standalone codegen mode
 	if *verbose {
 		fmt.Printf("Running goahead in standalone mode\n")
 		fmt.Printf("Processing directory: %s\n", *dir)
@@ -79,42 +73,41 @@ func main() {
 
 func showHelp() {
 	fmt.Printf(`goahead - Go code generation tool
-
-USAGE:
-    # Install goahead
-    go install github.com/AeonDave/goahead@latest
-
-    # Use with go build
-    go build -toolexec="goahead" main.go
-
-    # Use standalone
-    goahead -dir=.
-
-SETUP:
-    1. Create function files with markers:
-       //go:build exclude
-       //go:ahead functions
-
-    2. Add generation comments in your code:
-       //:functionName:arg1:arg2
-
-    3. Build with toolexec integration:
-       go build -toolexec="goahead" ./...
-
-OPTIONS:
-    -dir string     Directory to process (default ".")
-    -verbose        Enable verbose output
-    -help           Show this help
-    -version        Show version
-
-ENVIRONMENT:
-    GOAHEAD_VERBOSE=1    Enable verbose output in toolexec mode
-
-VERSION: %s
-`, version)
+	
+	USAGE:
+	    # Install goahead
+	    go install github.com/AeonDave/goahead@latest
+	
+	    # Use with go build
+	    go build -toolexec="goahead" main.go
+	
+	    # Use standalone
+	    goahead -dir=.
+	
+	SETUP:
+	    1. Create function files with markers:
+	       //go:build exclude
+	       //go:ahead functions
+	
+	    2. Add generation comments in your code:
+	       //:functionName:arg1:arg2
+	
+	    3. Build with toolexec integration:
+	       go build -toolexec="goahead" ./...
+	
+	OPTIONS:
+	    -dir string     Directory to process (default ".")
+	    -verbose        Enable verbose output
+	    -help           Show this help
+	    -version        Show version
+	
+	ENVIRONMENT:
+	    GOAHEAD_VERBOSE=1    Enable verbose output in toolexec mode
+	
+	VERSION: %s
+	`, version)
 }
 
-// Toolexec wrapper functionality
 func runAsToolexec() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <original-tool> [args...]\n", os.Args[0])
@@ -124,14 +117,11 @@ func runAsToolexec() {
 	originalTool := os.Args[1]
 	originalArgs := os.Args[2:]
 
-	// Intercept only the compiler, not linker or assembler
 	if !strings.HasSuffix(originalTool, "compile") && !strings.Contains(originalTool, "compile") {
-		// For other tools (link, asm), execute directly
 		runOriginalTool(originalTool, originalArgs)
 		return
 	}
 
-	// Find .go files in compiler arguments
 	var goFiles []string
 	var outputDir string
 
@@ -145,7 +135,6 @@ func runAsToolexec() {
 		}
 	}
 
-	// If we have .go files, run codegen
 	if len(goFiles) > 0 {
 		workDir := findCommonDir(goFiles)
 		if workDir == "" {
@@ -164,11 +153,8 @@ func runAsToolexec() {
 			if verbose {
 				fmt.Fprintf(os.Stderr, "[goahead] Codegen failed: %v\n", err)
 			}
-			// Don't stop the build, continue
 		}
 	}
-
-	// Execute the original tool
 	runOriginalTool(originalTool, originalArgs)
 }
 
@@ -201,8 +187,6 @@ func runOriginalTool(tool string, args []string) {
 	}
 }
 
-// === CODEGEN FUNCTIONALITY ===
-
 func runCodegen(dir string, verbose bool) error {
 	if verbose {
 		fmt.Printf("Parsed flags:\n")
@@ -210,13 +194,11 @@ func runCodegen(dir string, verbose bool) error {
 		fmt.Printf("  verbose: %t\n", verbose)
 	}
 
-	// Create processor context
 	ctx := &ProcessorContext{
 		Functions: make(map[string]*UserFunction),
 		FileSet:   token.NewFileSet(),
 	}
 
-	// Create temporary directory
 	tempDir, err := os.MkdirTemp("", "codegen-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp directory: %v", err)
@@ -224,7 +206,6 @@ func runCodegen(dir string, verbose bool) error {
 	defer os.RemoveAll(tempDir)
 	ctx.TempDir = tempDir
 
-	// Find all function files with //go:ahead functions marker
 	if err := ctx.findFunctionFiles(dir); err != nil {
 		return fmt.Errorf("failed to find function files: %v", err)
 	}
@@ -235,7 +216,6 @@ func runCodegen(dir string, verbose bool) error {
 		return nil
 	}
 
-	// Load functions from all found files
 	if err := ctx.loadUserFunctions(); err != nil {
 		return fmt.Errorf("failed to load user functions: %v", err)
 	}
@@ -251,25 +231,19 @@ func runCodegen(dir string, verbose bool) error {
 		}
 	}
 
-	// Process directory
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
 		if d.IsDir() {
 			return nil
 		}
-
 		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
-
-		// Skip function files and temporary files
 		if ctx.isFunctionFile(path) || strings.Contains(path, ctx.TempDir) {
 			return nil
 		}
-
 		ctx.CurrentFile = path
 		return ctx.processGoFile(path, verbose)
 	})
@@ -283,7 +257,6 @@ func runCodegen(dir string, verbose bool) error {
 	return nil
 }
 
-// findFunctionFiles searches for .go files with //go:ahead functions marker
 func (ctx *ProcessorContext) findFunctionFiles(dir string) error {
 	ctx.FuncFiles = []string{}
 
@@ -291,15 +264,12 @@ func (ctx *ProcessorContext) findFunctionFiles(dir string) error {
 		if err != nil {
 			return err
 		}
-
 		if d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return nil
 		}
-
-		// Read first few lines to check for marker
 		file, err := os.Open(path)
 		if err != nil {
-			return nil // Skip files we can't read
+			return nil
 		}
 		defer file.Close()
 
@@ -307,7 +277,7 @@ func (ctx *ProcessorContext) findFunctionFiles(dir string) error {
 		lineCount := 0
 		hasGoAheadMarker := false
 
-		for scanner.Scan() && lineCount < 10 { // Check first 10 lines
+		for scanner.Scan() && lineCount < 10 {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "//go:ahead functions" {
 				hasGoAheadMarker = true
@@ -315,21 +285,17 @@ func (ctx *ProcessorContext) findFunctionFiles(dir string) error {
 			}
 			lineCount++
 		}
-
 		if hasGoAheadMarker {
 			ctx.FuncFiles = append(ctx.FuncFiles, path)
 		}
-
 		return nil
 	})
 }
 
-// isFunctionFile checks if a file is one of our function files
 func (ctx *ProcessorContext) isFunctionFile(path string) bool {
 	return slices.Contains(ctx.FuncFiles, path)
 }
 
-// loadUserFunctions loads user-defined functions from all found function files
 func (ctx *ProcessorContext) loadUserFunctions() error {
 	for _, funcFile := range ctx.FuncFiles {
 		if err := ctx.loadUserFunctionsFromFile(funcFile); err != nil {
@@ -339,7 +305,6 @@ func (ctx *ProcessorContext) loadUserFunctions() error {
 	return nil
 }
 
-// loadUserFunctionsFromFile loads user-defined functions from a specific file
 func (ctx *ProcessorContext) loadUserFunctionsFromFile(filePath string) error {
 	src, err := os.ReadFile(filePath)
 	if err != nil {
@@ -351,13 +316,10 @@ func (ctx *ProcessorContext) loadUserFunctionsFromFile(filePath string) error {
 		return fmt.Errorf("failed to parse functions file: %v", err)
 	}
 
-	// Find functions in the file
 	ast.Inspect(node, func(n ast.Node) bool {
 		if fn, ok := n.(*ast.FuncDecl); ok {
 			if fn.Name.IsExported() || fn.Name.Name[0] >= 'a' && fn.Name.Name[0] <= 'z' {
 				funcName := fn.Name.Name
-
-				// Check for duplicate function names
 				if existingFunc, exists := ctx.Functions[funcName]; exists {
 					log.Fatalf("ERROR: Duplicate function '%s' found!\n"+
 						"  - First definition: %s\n"+
@@ -372,14 +334,11 @@ func (ctx *ProcessorContext) loadUserFunctionsFromFile(filePath string) error {
 					FilePath:   filePath,
 				}
 
-				// Extract input types
 				if fn.Type.Params != nil {
 					for _, param := range fn.Type.Params.List {
 						if len(param.Names) == 0 {
-							// Parameter without name
 							userFunc.InputTypes = append(userFunc.InputTypes, typeToString(param.Type))
 						} else {
-							// Parameters with names
 							typeStr := typeToString(param.Type)
 							for range param.Names {
 								userFunc.InputTypes = append(userFunc.InputTypes, typeStr)
@@ -388,23 +347,19 @@ func (ctx *ProcessorContext) loadUserFunctionsFromFile(filePath string) error {
 					}
 				}
 
-				// Extract output type
 				if fn.Type.Results != nil && len(fn.Type.Results.List) > 0 {
 					userFunc.OutputType = typeToString(fn.Type.Results.List[0].Type)
 				} else {
 					userFunc.OutputType = "void"
 				}
-
 				ctx.Functions[fn.Name.Name] = userFunc
 			}
 		}
 		return true
 	})
-
 	return nil
 }
 
-// typeToString converts an AST type to string
 func typeToString(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.Ident:
@@ -427,7 +382,6 @@ func typeToString(expr ast.Expr) string {
 	}
 }
 
-// processGoFile processes a single Go file
 func (ctx *ProcessorContext) processGoFile(filePath string, verbose bool) error {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -439,7 +393,6 @@ func (ctx *ProcessorContext) processGoFile(filePath string, verbose bool) error 
 	scanner := bufio.NewScanner(file)
 	modified := false
 
-	// Pattern for comments: //:FunctionName:Arg1:Arg2:...
 	commentPattern := regexp.MustCompile(`^\s*//\s*:([^:]+)(?::(.*))?`)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -461,44 +414,34 @@ func (ctx *ProcessorContext) processGoFile(filePath string, verbose bool) error 
 					continue
 				}
 
-				// Get function output type for replacement
 				userFunc := ctx.Functions[funcName]
 				outputType := userFunc.OutputType
-
 				var newLine string
 				var replaced bool
 
 				switch outputType {
 				case "string":
-					// Replace the first string
 					stringPattern := regexp.MustCompile(`"([^"]*)"`)
 					if stringPattern.MatchString(nextLine) {
-						// Apply only the first substitution with correct escaping
 						if firstMatch := stringPattern.FindStringIndex(nextLine); firstMatch != nil {
 							escapedString := escapeString(result)
 							newLine = nextLine[:firstMatch[0]] + escapedString + nextLine[firstMatch[1]:]
 							replaced = true
 						}
 					}
-
 				case "int", "int32", "int64":
-					// Replace the first number (including 0)
-					intPattern := regexp.MustCompile(`-?\d+`)
+					intPattern := regexp.MustCompile(`\b\d+\b`)
 					if firstMatch := intPattern.FindStringIndex(nextLine); firstMatch != nil {
 						newLine = nextLine[:firstMatch[0]] + result + nextLine[firstMatch[1]:]
 						replaced = true
 					}
-
 				case "bool":
-					// Replace the first boolean value
 					boolPattern := regexp.MustCompile(`\b(true|false)\b`)
 					if firstMatch := boolPattern.FindStringIndex(nextLine); firstMatch != nil {
 						newLine = nextLine[:firstMatch[0]] + result + nextLine[firstMatch[1]:]
 						replaced = true
 					}
-
 				default:
-					// For unknown types, try with strings
 					stringPattern := regexp.MustCompile(`"([^"]*)"`)
 					if stringPattern.MatchString(nextLine) {
 						if firstMatch := stringPattern.FindStringIndex(nextLine); firstMatch != nil {
@@ -531,18 +474,15 @@ func (ctx *ProcessorContext) processGoFile(filePath string, verbose bool) error 
 	if modified {
 		return ctx.writeFile(filePath, lines)
 	}
-
 	return nil
 }
 
-// executeUserFunction executes a user-defined function
 func (ctx *ProcessorContext) executeUserFunction(funcName string, argsStr string) (string, error) {
 	userFunc, exists := ctx.Functions[funcName]
 	if !exists {
 		return "", fmt.Errorf("function %s not found", funcName)
 	}
 
-	// Parse arguments
 	args := []string{}
 	if argsStr != "" {
 		args = strings.Split(argsStr, ":")
@@ -551,13 +491,11 @@ func (ctx *ProcessorContext) executeUserFunction(funcName string, argsStr string
 		}
 	}
 
-	// Check argument count
 	if len(args) != len(userFunc.InputTypes) {
 		return "", fmt.Errorf("function %s expects %d arguments, got %d",
 			funcName, len(userFunc.InputTypes), len(args))
 	}
 
-	// Evaluate arguments
 	evaluatedArgs := make([]string, len(args))
 	for i, arg := range args {
 		val, err := ctx.evaluateExpression(arg)
@@ -566,55 +504,41 @@ func (ctx *ProcessorContext) executeUserFunction(funcName string, argsStr string
 		}
 		evaluatedArgs[i] = val
 	}
-
-	// Create a temporary program to call the function
 	return ctx.callUserFunction(funcName, evaluatedArgs)
 }
 
-// evaluateExpression evaluates an expression - supports only literals
 func (ctx *ProcessorContext) evaluateExpression(expression string) (string, error) {
-	// String literals
 	if strings.HasPrefix(expression, `"`) && strings.HasSuffix(expression, `"`) {
 		return strings.Trim(expression, `"`), nil
 	}
-
-	// Numbers
 	if _, err := strconv.Atoi(expression); err == nil {
 		return expression, nil
 	}
-
-	// Booleans
 	if expression == "true" || expression == "false" {
 		return expression, nil
 	}
-
-	// For anything else, return as-is (this allows for basic identifiers)
 	return expression, nil
 }
 
-// callUserFunction creates and executes a temporary program to call the user function
 func (ctx *ProcessorContext) callUserFunction(funcName string, args []string) (string, error) {
 	userFunc := ctx.Functions[funcName]
 
-	// Template for the temporary program - only import fmt by default
 	tmplStr := `package main
-
-import (
-	"fmt"
-{{.AdditionalImports}}
-)
-
-{{.UserFunctions}}
-
-func main() {
-	result := {{.FuncName}}({{.Args}})
-	fmt.Print(result)
-}
-`
-
-	// Extract functions and imports from ALL function files
+	
+	import (
+	 "fmt"
+	{{.AdditionalImports}}
+	)
+	
+	{{.UserFunctions}}
+	
+	func main() {
+	 result := {{.FuncName}}({{.Args}})
+	 fmt.Print(result)
+	}
+	`
 	var allFuncLines []string
-	importSet := make(map[string]bool) // Use a set to avoid duplicate imports
+	importSet := make(map[string]bool)
 
 	for _, funcFile := range ctx.FuncFiles {
 		userFuncContent, err := os.ReadFile(funcFile)
@@ -622,7 +546,6 @@ func main() {
 			return "", fmt.Errorf("failed to read user functions file %s: %v", funcFile, err)
 		}
 
-		// Extract only function definitions from user content
 		userFuncStr := string(userFuncContent)
 		lines := strings.Split(userFuncStr, "\n")
 		var funcLines []string
@@ -632,18 +555,15 @@ func main() {
 
 		for _, line := range lines {
 			trimmed := strings.TrimSpace(line)
-
-			// Skip build tags, package declaration, and go:ahead comments
-			if strings.HasPrefix(trimmed, "//go:build exclude") ||
+			if strings.HasPrefix(trimmed, "//go:build") ||
 				strings.HasPrefix(trimmed, "//go:ahead") ||
 				strings.HasPrefix(trimmed, "package ") {
 				continue
-			} // Collect import statements
+			}
 			if strings.HasPrefix(trimmed, "import") {
 				if strings.Contains(trimmed, "(") {
-					skipNext = true // Multi-line import
+					skipNext = true
 				} else {
-					// Single line import like: import "fmt"
 					if parts := strings.Fields(trimmed); len(parts) >= 2 {
 						importPath := strings.Trim(parts[1], `"`)
 						importSet[importPath] = true
@@ -652,11 +572,9 @@ func main() {
 				continue
 			}
 			if skipNext {
-				// Handle multi-line imports
 				if strings.Contains(trimmed, ")") {
 					skipNext = false
 				} else if trimmed != "" && !strings.HasPrefix(trimmed, "//") {
-					// Extract import path
 					importPath := strings.Trim(trimmed, `" 	`)
 					if importPath != "" {
 						importSet[importPath] = true
@@ -664,62 +582,46 @@ func main() {
 				}
 				continue
 			}
-
-			// Skip standalone comments (not in functions)
 			if strings.HasPrefix(trimmed, "//") && !inFunction {
 				continue
 			}
-
-			// Detect function start
 			if strings.Contains(trimmed, "func ") && !inFunction {
 				inFunction = true
 				braceCount = 0
 			}
-
 			if inFunction {
 				funcLines = append(funcLines, line)
-
-				// Count braces to detect function end
 				braceCount += strings.Count(line, "{")
 				braceCount -= strings.Count(line, "}")
-
-				// Function ends when brace count returns to 0
 				if braceCount == 0 && strings.Contains(line, "}") {
 					inFunction = false
 				}
 			}
 		}
-
-		// Add functions from this file to the collection
 		allFuncLines = append(allFuncLines, funcLines...)
 	}
 
-	// Prepare arguments for the function call
 	formattedArgs := make([]string, len(args))
 	for i, arg := range args {
 		inputType := userFunc.InputTypes[i]
 		switch inputType {
 		case "string":
-			// For strings, use raw string literals to avoid escaping issues
 			formattedArgs[i] = "`" + arg + "`"
 		case "int", "int32", "int64":
 			formattedArgs[i] = arg
 		case "bool":
 			formattedArgs[i] = arg
 		default:
-			// Default: use raw string literals
 			formattedArgs[i] = "`" + arg + "`"
 		}
-	} // Prepare additional imports - include all imports from user functions
+	}
 	var additionalImports []string
 	for importPath := range importSet {
-		// Skip fmt as it's already included in the template
 		if importPath != "fmt" {
 			additionalImports = append(additionalImports, "\t\""+importPath+"\"")
 		}
 	}
 
-	// Create the temporary program
 	tmpl := template.Must(template.New("program").Parse(tmplStr))
 	data := struct {
 		UserFunctions     string
@@ -741,19 +643,16 @@ func main() {
 		file.Close()
 		return "", fmt.Errorf("failed to execute template: %v", err)
 	}
-	file.Close() // Close explicitly before execution
+	file.Close()
 
-	// Execute the temporary program
 	cmd := exec.Command("go", "run", tempFile)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("failed to execute temp program: %v", err)
+		return "", fmt.Errorf("failed to execute temp program: %v\nOutput:\n%s", err, string(output))
 	}
-
 	return strings.TrimSpace(string(output)), nil
 }
 
-// writeFile writes lines to a file
 func (ctx *ProcessorContext) writeFile(filePath string, lines []string) error {
 	file, err := os.Create(filePath)
 	if err != nil {
@@ -769,16 +668,12 @@ func (ctx *ProcessorContext) writeFile(filePath string, lines []string) error {
 			return fmt.Errorf("failed to write to file %s: %v", filePath, err)
 		}
 	}
-
 	return nil
 }
 
-// escapeString properly handles string escaping for Go code
 func escapeString(s string) string {
-	// If string contains backslash, use raw string
 	if strings.Contains(s, "\\") {
 		return "`" + s + "`"
 	}
-	// Otherwise use normal string with appropriate escaping
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
