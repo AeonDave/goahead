@@ -483,7 +483,7 @@ func (ctx *ProcessorContext) processGoFile(filePath string, verbose bool) error 
 
 				case "int", "int32", "int64":
 					// Replace the first number (including 0)
-					intPattern := regexp.MustCompile(`\b\d+\b`)
+					intPattern := regexp.MustCompile(`-?\d+`)
 					if firstMatch := intPattern.FindStringIndex(nextLine); firstMatch != nil {
 						newLine = nextLine[:firstMatch[0]] + result + nextLine[firstMatch[1]:]
 						replaced = true
