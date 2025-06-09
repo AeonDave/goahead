@@ -634,7 +634,7 @@ func main() {
 			trimmed := strings.TrimSpace(line)
 
 			// Skip build tags, package declaration, and go:ahead comments
-			if strings.HasPrefix(trimmed, "//go:build") ||
+			if strings.HasPrefix(trimmed, "//go:build exclude") ||
 				strings.HasPrefix(trimmed, "//go:ahead") ||
 				strings.HasPrefix(trimmed, "package ") {
 				continue
