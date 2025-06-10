@@ -15,10 +15,29 @@ endif
 .PHONY: all
 all: build
 
-# Build for current platform
+# Build for current platform with auto version increment
 .PHONY: build
-build:
+build: increment-version
 	@echo "Building goahead for current platform..."
+	go build -o $(BINARY_NAME)$(EXE_EXT)
+
+# Increment build/patch version automatically
+.PHONY: increment-version
+increment-version:
+	@echo "Incrementing build version..."
+	@current_version=$$(grep 'Version = ' internal/constants.go | sed 's/.*"\([^"]*\)".*/\1/'); \
+	major=$$(echo $$current_version | cut -d. -f1); \
+	minor=$$(echo $$current_version | cut -d. -f2); \
+	patch=$$(echo $$current_version | cut -d. -f3); \
+	new_patch=$$((patch + 1)); \
+	new_version="$$major.$$minor.$$new_patch"; \
+	echo "Updating version from $$current_version to $$new_version"; \
+	sed -i 's/Version = "[^"]*"/Version = "'$$new_version'"/' internal/constants.go
+
+# Build without version increment
+.PHONY: build-no-version
+build-no-version:
+	@echo "Building goahead for current platform (no version increment)..."
 	go build -o $(BINARY_NAME)$(EXE_EXT)
 
 # Install locally

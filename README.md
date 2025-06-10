@@ -1,53 +1,38 @@
-# GoAhead - Code Generation Tool
+# GoAhead - Intelligent Code Generation Tool
 
-Simple compile-time user-defined functions evaluator tool.
-Replaces special comments with the results of user-defined functions.
+**Compile-time code generation with intelligent placeholder replacement**
 
-## Features
+GoAhead is a powerful Go tool that automatically replaces placeholders in your code with the results of user-defined functions during compilation. It features intelligent replacement that preserves complex expressions while substituting only the specific placeholders.
 
-- **Automatic function discovery**: Automatically finds function files with `//go:ahead functions` marker
-- **Multiple function files**: Support unlimited function files in your project
-- **User-defined functions**: Define your own functions for code generation
-- **Multiple return types**: Support for `string`, `int`, and `bool` return types
-- **Type-safe replacements**: Preserves Go's type system during code generation
-- **Robust error handling**: Clear error messages for debugging and duplicate detection
-- **Automated workflow**: Integration with `go generate`, Makefiles, and `go build -toolexec`
-- **Build integration**: Seamless integration with Go build process via `-toolexec`
-- **Cross-platform**: Works on Windows, Linux, and macOS
+## Quick Installation & Usage
 
-## Installation
-
-Install GoAhead using Go's package manager:
-
+### 1. Install from GitHub
 ```bash
 go install github.com/AeonDave/goahead@latest
 ```
 
-## Integration Options
-
-The recommended way to use GoAhead is through Go's `-toolexec` flag, which automatically runs code generation during builds:
-
+### 2. Use with Your Projects
 ```bash
-# Use it with your builds (goahead must be in your PATH)
+# Automatic code generation during build (recommended)
 go build -toolexec="goahead" ./...
 go test -toolexec="goahead" ./...
 go run -toolexec="goahead" main.go
-```
-This approach automatically runs code generation before compilation, works with all Go commands, requires no manual intervention, and can be integrated into CI/CD pipelines. Verbose output can be enabled with `GOAHEAD_VERBOSE=1`.
 
-Alternatively, you can run the tool manually (`goahead -dir ./path/to/your/project`) or use `//go:generate goahead -dir .` in your Go files and then run `go generate ./...`.
-
-## Quick Start
-
-### 1. Install
-
-```bash
-go install github.com/AeonDave/goahead@latest
+# Enable verbose output
+GOAHEAD_VERBOSE=1 go build -toolexec="goahead" ./...
 ```
 
-### 2. Define Your Functions
+This approach:
+- ✅ Runs automatically before compilation
+- ✅ Works with all Go commands (`build`, `test`, `run`)
+- ✅ Requires no manual intervention
+- ✅ Integrates seamlessly with CI/CD pipelines
+- ✅ Processes only your project files (excludes system libraries)
 
-Create one or more function files (e.g., `functions.go`) with these special markers:
+## 📖 Complete Example
+
+### 1. Create Function Definitions
+Create a file `functions.go` with your custom functions:
 
 ```go
 //go:build exclude
@@ -58,126 +43,144 @@ package main
 import "strings"
 
 // String functions
+func getString() string {
+    return "Hello World"
+}
+
 func toUpper(msg string) string {
     return strings.ToUpper(msg)
 }
 
 func concat(a, b string) string {
-    return a + "_" + b
+    return a + " " + b
 }
 
-// Int functions
-func stringLength(s string) int {
-    return len(s)
+// Numeric functions
+func getInt() int {
+    return 42
 }
 
-// Bool functions
-func isEven(n int) bool {
-    return n%2 == 0
+func addInt(a, b int) int {
+    return a + b
+}
+
+func getFloat() float32 {
+    return 3.14159
+}
+
+// Boolean functions
+func getBool() bool {
+    return true
 }
 ```
 
-### 3. Use in Your Code
-
-Create a Go file with special comments:
+### 2. Use Placeholders in Your Code
+Create your main Go file with placeholders:
 
 ```go
 package main
 
-import "fmt"
+import (
+    "fmt"
+    "strings"
+)
 
 func main() {
-    // This comment will be replaced with "HELLO WORLD"
-    //:toUpper:"hello world"
-    message := ""
+    // ✨ Intelligent replacement preserves complex expressions
     
-    // This comment will be replaced with "Go_Lang"
-    //:concat:"Go":"Lang"
-    combined := ""
+    //:getString
+    result1 := strings.ToUpper("")  // → strings.ToUpper("Hello World")
     
-    // This comment will be replaced with 7
-    //:stringLength:"example"
-    length := 0
+    //:getInt
+    result2 := int(0) + 10         // → int(42) + 10
     
-    // This comment will be replaced with true
-    //:isEven:10
-    even := false
+    //:getBool
+    result3 := !false              // → !true
     
-    fmt.Printf("Message: %s, Combined: %s, Length: %d, Even: %t\n", 
-               message, combined, length, even)
+    //:getFloat
+    result4 := 0.0 * 2.5          // → 3.14159 * 2.5
+
+    fmt.Printf("String: %s\n", result1)     // HELLO WORLD
+    fmt.Printf("Int: %d\n", result2)        // 52
+    fmt.Printf("Bool: %t\n", result3)       // false  
+    fmt.Printf("Float: %.2f\n", result4)    // 7.85
 }
 ```
 
-### 4. Generate Code
-
-Using the recommended build integration:
+### 3. Build with Automatic Code Generation
 ```bash
-go build -toolexec="goahead" main.go
+# Install GoAhead
+go install github.com/AeonDave/goahead@latest
+
+# Build your project with automatic code generation
+go build -toolexec="goahead" .
+
+# Run the generated code
+./your-project
 ```
 
-Or manually:
-```bash
-goahead
-```
+## Intelligent Replacement Examples
 
-After generation, your code becomes:
+GoAhead intelligently replaces only the placeholders while preserving your expressions:
 
-```go
-package main
-
-import "fmt"
-
-func main() {
-    // This comment will be replaced with "HELLO WORLD"
-    message := "HELLO WORLD"
-    
-    // This comment will be replaced with "Go_Lang"
-    combined := "Go_Lang"
-    
-    // This comment will be replaced with 7
-    length := 7
-    
-    // This comment will be replaced with true
-    even := true
-    
-    fmt.Printf("Message: %s, Combined: %s, Length: %d, Even: %t\n", 
-               message, combined, length, even)
-}
-```
-
-## Multiple Function Files
-
-You can organize your functions across multiple files. Function names must be unique across all function files.
-
+| Original Code | After GoAhead | Result |
+|---------------|---------------|---------|
+| `strings.ToUpper("")` | `strings.ToUpper("Hello")` | `"HELLO"` |
+| `int(0) + 5` | `int(42) + 5` | `47` |
+| `!false` | `!true` | `false` |
+| `0.0 * 3.14` | `2.5 * 3.14` | `7.85` |
+| `len("") > 0` | `len("test") > 0` | `true` |
 ## Function Definition Rules
 
-- Functions must be defined in files with both `//go:build exclude` and `//go:ahead functions` markers.
-- Functions must return exactly one value of type `string`, `int`, or `bool`.
-- Function names are case-sensitive and must be unique.
-- Supported argument types: Strings (e.g. `"value"`), Integers (e.g. `42`), Booleans (e.g. `true`).
+### Requirements
+- Functions must be in files with both `//go:build exclude` and `//go:ahead functions` markers
+- Functions must return exactly one value
+- Function names are case-sensitive and must be unique across all files
+- Use meaningful function names for better code readability
 
-## Command Line Options
+### Supported Types
+| Type | Placeholder | Example |
+|------|-------------|---------|
+| `string` | `""` | `func getName() string { return "John" }` |
+| `int`, `int8-64` | `0` | `func getAge() int { return 25 }` |
+| `uint`, `uint8-64` | `0` | `func getCount() uint { return 100 }` |
+| `float32`, `float64` | `0.0` or `0` | `func getPi() float32 { return 3.14 }` |
+| `bool` | `false` | `func isValid() bool { return true }` |
 
-### GoAhead Tool
+### Multiple Function Files
+Organize functions across multiple files for better structure:
+```
+project/
+├── auth_functions.go      # Authentication related
+├── data_functions.go      # Data processing  
+├── config_functions.go    # Configuration
+└── main.go                # Your main code
+```
+
+### Manual Usage
 ```bash
 goahead [options]
 
 Options:
-  -dir string
-        Directory to scan for Go files and function files (default ".")
-  -verbose
-        Enable verbose output
+  -dir string        Directory to process (default ".")
+  -verbose          Enable verbose output  
+  -help             Show help message
+  -version          Show version information
 ```
 
-When used with `-toolexec`, environment variables can control behavior:
+### Environment Variables
 ```bash
-GOAHEAD_VERBOSE=1    Enable verbose output
+GOAHEAD_VERBOSE=1    # Enable verbose output in toolexec mode
 ```
 
-## Error Handling
+## 🔧 Advanced Features
 
-The tool provides clear error messages for issues like: function not found, type mismatch, parse errors, file errors, duplicate functions, and no function files found.
-
-## License
-
-MIT License - see LICENSE file for details.
+### CI/CD Integration
+Add to your CI/CD pipeline:
+```yaml
+# GitHub Actions example
+- name: Build with GoAhead
+  run: |
+    go install github.com/AeonDave/goahead@latest
+    go build -toolexec="goahead" ./...
+```
