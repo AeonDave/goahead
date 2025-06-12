@@ -1,4 +1,4 @@
-# GoAhead - Intelligent Code Generation Tool
+# GoAhead - Compile-time Code Generation Tool
 
 **Compile-time code generation with intelligent placeholder replacement**
 
@@ -28,8 +28,6 @@ This approach:
 - ✅ Requires no manual intervention
 - ✅ Integrates seamlessly with CI/CD pipelines
 - ✅ Processes only your project files (excludes system libraries)
-
-## 📖 Complete Example
 
 ### 1. Create Function Definitions
 Create a file `functions.go` with your custom functions:
@@ -119,7 +117,7 @@ go build -toolexec="goahead" .
 ./your-project
 ```
 
-## Intelligent Replacement Examples
+## Replacement Examples
 
 GoAhead intelligently replaces only the placeholders while preserving your expressions:
 
@@ -171,16 +169,4 @@ Options:
 ### Environment Variables
 ```bash
 GOAHEAD_VERBOSE=1    # Enable verbose output in toolexec mode
-```
-
-## 🔧 Advanced Features
-
-### CI/CD Integration
-Add to your CI/CD pipeline:
-```yaml
-# GitHub Actions example
-- name: Build with GoAhead
-  run: |
-    go install github.com/AeonDave/goahead@latest
-    go build -toolexec="goahead" ./...
 ```
