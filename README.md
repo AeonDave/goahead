@@ -121,13 +121,13 @@ go build -toolexec="goahead" .
 
 GoAhead intelligently replaces only the placeholders while preserving your expressions:
 
-| Original Code | After GoAhead | Result |
-|---------------|---------------|---------|
+| Original Code         | After GoAhead              | Result    |
+|-----------------------|----------------------------|-----------|
 | `strings.ToUpper("")` | `strings.ToUpper("Hello")` | `"HELLO"` |
-| `int(0) + 5` | `int(42) + 5` | `47` |
-| `!false` | `!true` | `false` |
-| `0.0 * 3.14` | `2.5 * 3.14` | `7.85` |
-| `len("") > 0` | `len("test") > 0` | `true` |
+| `int(0) + 5`          | `int(42) + 5`              | `47`      |
+| `!false`              | `!true`                    | `false`   |
+| `0.0 * 3.14`          | `2.5 * 3.14`               | `7.85`    |
+| `len("") > 0`         | `len("test") > 0`          | `true`    |
 ## Function Definition Rules
 
 ### Requirements
@@ -137,13 +137,13 @@ GoAhead intelligently replaces only the placeholders while preserving your expre
 - Use meaningful function names for better code readability
 
 ### Supported Types
-| Type | Placeholder | Example |
-|------|-------------|---------|
-| `string` | `""` | `func getName() string { return "John" }` |
-| `int`, `int8-64` | `0` | `func getAge() int { return 25 }` |
-| `uint`, `uint8-64` | `0` | `func getCount() uint { return 100 }` |
-| `float32`, `float64` | `0.0` or `0` | `func getPi() float32 { return 3.14 }` |
-| `bool` | `false` | `func isValid() bool { return true }` |
+| Type                 | Placeholder  | Example                                   |
+|----------------------|--------------|-------------------------------------------|
+| `string`             | `""`         | `func getName() string { return "John" }` |
+| `int`, `int8-64`     | `0`          | `func getAge() int { return 25 }`         |
+| `uint`, `uint8-64`   | `0`          | `func getCount() uint { return 100 }`     |
+| `float32`, `float64` | `0.0` or `0` | `func getPi() float32 { return 3.14 }`    |
+| `bool`               | `false`      | `func isValid() bool { return true }`     |
 
 ### Multiple Function Files
 Organize functions across multiple files for better structure:
