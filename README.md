@@ -85,16 +85,16 @@ import (
 
 func main() {
     // ✨ Intelligent replacement preserves complex expressions
-    
+
     //:getString
     result1 := strings.ToUpper("")  // → strings.ToUpper("Hello World")
-    
+
     //:getInt
     result2 := int(0) + 10         // → int(42) + 10
-    
+
     //:getBool
     result3 := !false              // → !true
-    
+
     //:getFloat
     result4 := 0.0 * 2.5          // → 3.14159 * 2.5
 
@@ -128,6 +128,74 @@ GoAhead intelligently replaces only the placeholders while preserving your expre
 | `!false`              | `!true`                    | `false`   |
 | `0.0 * 3.14`          | `2.5 * 3.14`               | `7.85`    |
 | `len("") > 0`         | `len("test") > 0`          | `true`    |
+
+## Calling Functions with Parameters
+
+For functions that require parameters, use the colon syntax after the function name:
+
+```
+//:functionName:arg1:arg2:arg3
+```
+
+Arguments are separated by colons (`:`) and support different data types:
+
+### Parameter Types
+- **Strings**: enclosed in double quotes `"hello world"`
+- **Numbers**: without quotes `42`, `3.14`
+- **Booleans**: `true` or `false`
+
+### Examples with Parameters
+
+```go
+// Function definitions (in functions.go)
+func toUpper(msg string) string {
+    return strings.ToUpper(msg)
+}
+
+func concat(a, b string) string {
+    return a + " " + b
+}
+
+func addInt(a, b int) int {
+    return a + b
+}
+
+func multiply(a float64, b float64) float64 {
+    return a * b
+}
+
+// Usage in your code
+func main() {
+    // String function with one parameter
+    //:toUpper:"hello world"
+    result1 := strings.ToLower("")  // → strings.ToLower("HELLO WORLD")
+
+    // Function with multiple string parameters
+    //:concat:"Hello":"World"
+    result2 := fmt.Sprintf("%s", "")  // → fmt.Sprintf("%s", "Hello World")
+
+    // Numeric function with parameters
+    //:addInt:10:32
+    result3 := int(0) * 2  // → int(42) * 2
+
+    // Float function with parameters
+    //:multiply:3.14:2.0
+    result4 := 0.0 + 1.0  // → 6.28 + 1.0
+
+    fmt.Printf("Upper: %s\n", result1)      // HELLO WORLD
+    fmt.Printf("Concat: %s\n", result2)     // Hello World
+    fmt.Printf("Add: %d\n", result3)        // 84
+    fmt.Printf("Multiply: %.2f\n", result4) // 7.28
+}
+```
+
+### Parameter Syntax Rules
+- Arguments must match the function's parameter types exactly
+- String arguments must be enclosed in double quotes
+- Numeric and boolean arguments should not be quoted
+- Arguments are separated by colons with no spaces
+- The number of arguments must match the function definition
+
 ## Function Definition Rules
 
 ### Requirements
