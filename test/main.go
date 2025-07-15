@@ -11,5 +11,10 @@ func main() {
 	//:getInt
 	num := 42
 
-	fmt.Printf("Message: %s, Number: %d\n", msg, num)
+	//:ShadowStr:pippo
+	secret := ""
+
+	fmt.Printf("Message: %s\n", msg)
+	fmt.Printf("Number: %d\n", num)
+	fmt.Printf("Secret: %s\n", secret)
 }
