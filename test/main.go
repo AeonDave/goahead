@@ -6,10 +6,10 @@ import "fmt"
 
 func main() {
 	//:getString
-	msg := "Hello World"
+	msg := ""
 
 	//:getInt
-	num := 42
+	num := 0
 
 	//:ShadowStr:pippo
 	secret := ""
