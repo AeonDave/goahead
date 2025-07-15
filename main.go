@@ -11,14 +11,11 @@ import (
 )
 
 func main() {
-	// Verifica se eseguire come toolexec
 	if isToolexecMode() {
 		toolexecManager := internal.NewToolexecManager()
 		toolexecManager.RunAsToolexec()
 		return
 	}
-
-	// Modalità standalone
 	config := parseFlags()
 
 	if config.Help {
@@ -41,7 +38,6 @@ func main() {
 	}
 }
 
-// isToolexecMode verifica se siamo in modalità toolexec
 func isToolexecMode() bool {
 	return len(os.Args) >= 2 &&
 		!strings.HasPrefix(os.Args[1], "-") &&
@@ -50,7 +46,6 @@ func isToolexecMode() bool {
 			strings.Contains(os.Args[1], "asm"))
 }
 
-// parseFlags analizza i flag della riga di comando
 func parseFlags() *internal.Config {
 	config := &internal.Config{}
 
@@ -58,13 +53,11 @@ func parseFlags() *internal.Config {
 	flag.BoolVar(&config.Verbose, "verbose", false, "Enable verbose output")
 	flag.BoolVar(&config.Help, "help", false, "Show help")
 	flag.BoolVar(&config.Version, "version", false, "Show version")
-
 	flag.Parse()
 
 	return config
 }
 
-// showHelp mostra l'aiuto
 func showHelp() {
 	fmt.Printf(`goahead - Go code generation tool
 	

@@ -4,7 +4,6 @@ import (
 	"go/token"
 )
 
-// UserFunction rappresenta una funzione definita dall'utente
 type UserFunction struct {
 	Name       string
 	InputTypes []string
@@ -12,7 +11,6 @@ type UserFunction struct {
 	FilePath   string
 }
 
-// ProcessorContext contiene lo stato del processore di codice
 type ProcessorContext struct {
 	Functions   map[string]*UserFunction
 	FileSet     *token.FileSet
@@ -21,7 +19,6 @@ type ProcessorContext struct {
 	TempDir     string
 }
 
-// Config contiene la configurazione dell'applicazione
 type Config struct {
 	Dir     string
 	Verbose bool

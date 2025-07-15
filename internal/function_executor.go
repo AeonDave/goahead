@@ -10,17 +10,14 @@ import (
 	"text/template"
 )
 
-// FunctionExecutor gestisce l'esecuzione delle funzioni utente
 type FunctionExecutor struct {
 	ctx *ProcessorContext
 }
 
-// NewFunctionExecutor crea un nuovo esecutore di funzioni
 func NewFunctionExecutor(ctx *ProcessorContext) *FunctionExecutor {
 	return &FunctionExecutor{ctx: ctx}
 }
 
-// ExecuteFunction esegue una funzione utente con i parametri specificati
 func (fe *FunctionExecutor) ExecuteFunction(funcName string, argsStr string) (string, error) {
 	userFunc, exists := fe.ctx.Functions[funcName]
 	if !exists {
@@ -45,7 +42,6 @@ func (fe *FunctionExecutor) ExecuteFunction(funcName string, argsStr string) (st
 	return fe.callUserFunction(funcName, evaluatedArgs)
 }
 
-// parseArguments analizza la stringa degli argomenti
 func (fe *FunctionExecutor) parseArguments(argsStr string) ([]string, error) {
 	if argsStr == "" {
 		return []string{}, nil
@@ -59,7 +55,6 @@ func (fe *FunctionExecutor) parseArguments(argsStr string) ([]string, error) {
 	return args, nil
 }
 
-// evaluateArguments valuta tutti gli argomenti
 func (fe *FunctionExecutor) evaluateArguments(args []string) ([]string, error) {
 	evaluatedArgs := make([]string, len(args))
 
@@ -74,46 +69,32 @@ func (fe *FunctionExecutor) evaluateArguments(args []string) ([]string, error) {
 	return evaluatedArgs, nil
 }
 
-// evaluateExpression valuta una singola espressione
 func (fe *FunctionExecutor) evaluateExpression(expression string) (string, error) {
-	// Stringa tra virgolette
 	if strings.HasPrefix(expression, `"`) && strings.HasSuffix(expression, `"`) {
 		return strings.Trim(expression, `"`), nil
 	}
-
-	// Numero intero
 	if _, err := strconv.Atoi(expression); err == nil {
 		return expression, nil
 	}
-
-	// Valore booleano
 	if expression == "true" || expression == "false" {
 		return expression, nil
 	}
-
 	return expression, nil
 }
 
-// callUserFunction chiama effettivamente la funzione utente
 func (fe *FunctionExecutor) callUserFunction(funcName string, args []string) (string, error) {
 	userFunc := fe.ctx.Functions[funcName]
-
-	// Prepara il codice per l'esecuzione
 	code, err := fe.prepareExecutionCode(funcName, args, userFunc)
 	if err != nil {
 		return "", err
 	}
-
-	// Esegue il codice
 	return fe.executeCode(code)
 }
 
-// prepareExecutionCode prepara il codice per l'esecuzione
 func (fe *FunctionExecutor) prepareExecutionCode(funcName string, args []string, userFunc *UserFunction) (string, error) {
 	allFuncLines, importSet := fe.extractFunctionsAndImports()
 	formattedArgs := fe.formatArguments(args, userFunc.InputTypes)
 	additionalImports := fe.formatImports(importSet)
-
 	tmpl := template.Must(template.New("program").Parse(ExecutionTemplate))
 
 	data := struct {
@@ -133,7 +114,11 @@ func (fe *FunctionExecutor) prepareExecutionCode(funcName string, args []string,
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp file: %v", err)
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+		}
+	}(file)
 
 	if err := tmpl.Execute(file, data); err != nil {
 		return "", fmt.Errorf("failed to execute template: %v", err)
@@ -142,7 +127,6 @@ func (fe *FunctionExecutor) prepareExecutionCode(funcName string, args []string,
 	return tempFile, nil
 }
 
-// extractFunctionsAndImports estrae le funzioni e gli import dai file
 func (fe *FunctionExecutor) extractFunctionsAndImports() ([]string, map[string]bool) {
 	var allFuncLines []string
 	importSet := make(map[string]bool)
@@ -159,7 +143,6 @@ func (fe *FunctionExecutor) extractFunctionsAndImports() ([]string, map[string]b
 	return allFuncLines, importSet
 }
 
-// processFunctionFile elabora un singolo file di funzioni
 func (fe *FunctionExecutor) processFunctionFile(funcFile string) ([]string, map[string]bool) {
 	userFuncContent, err := os.ReadFile(funcFile)
 	if err != nil {
@@ -178,24 +161,17 @@ func (fe *FunctionExecutor) processFunctionFile(funcFile string) ([]string, map[
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-
-		// Salta le direttive del compilatore e package
 		if fe.shouldSkipLine(trimmed) {
 			continue
 		}
-
-		// Gestisce gli import
 		if fe.handleImportLine(trimmed, &skipNext, importSet) {
 			continue
 		}
-
 		if skipNext {
 			if fe.handleImportBlock(trimmed, &skipNext, importSet) {
 				continue
 			}
 		}
-
-		// Gestisce le funzioni
 		if fe.handleFunctionLine(line, trimmed, &inFunction, &braceCount, &funcLines) {
 			continue
 		}
@@ -204,14 +180,12 @@ func (fe *FunctionExecutor) processFunctionFile(funcFile string) ([]string, map[
 	return funcLines, importSet
 }
 
-// shouldSkipLine verifica se una riga deve essere saltata
 func (fe *FunctionExecutor) shouldSkipLine(trimmed string) bool {
 	return strings.HasPrefix(trimmed, "//go:build") ||
 		strings.HasPrefix(trimmed, "//go:ahead") ||
 		strings.HasPrefix(trimmed, "package ")
 }
 
-// handleImportLine gestisce le righe di import
 func (fe *FunctionExecutor) handleImportLine(trimmed string, skipNext *bool, importSet map[string]bool) bool {
 	if strings.HasPrefix(trimmed, "import") {
 		if strings.Contains(trimmed, "(") {
@@ -227,7 +201,6 @@ func (fe *FunctionExecutor) handleImportLine(trimmed string, skipNext *bool, imp
 	return false
 }
 
-// handleImportBlock gestisce i blocchi di import
 func (fe *FunctionExecutor) handleImportBlock(trimmed string, skipNext *bool, importSet map[string]bool) bool {
 	if strings.Contains(trimmed, ")") {
 		*skipNext = false
@@ -240,7 +213,6 @@ func (fe *FunctionExecutor) handleImportBlock(trimmed string, skipNext *bool, im
 	return true
 }
 
-// handleFunctionLine gestisce le righe delle funzioni
 func (fe *FunctionExecutor) handleFunctionLine(line, trimmed string, inFunction *bool, braceCount *int, funcLines *[]string) bool {
 	if strings.HasPrefix(trimmed, "//") && !*inFunction {
 		return true
@@ -263,7 +235,6 @@ func (fe *FunctionExecutor) handleFunctionLine(line, trimmed string, inFunction 
 	return *inFunction
 }
 
-// formatArguments formatta gli argomenti in base ai loro tipi
 func (fe *FunctionExecutor) formatArguments(args []string, inputTypes []string) []string {
 	formattedArgs := make([]string, len(args))
 
@@ -306,7 +277,6 @@ func (fe *FunctionExecutor) formatArguments(args []string, inputTypes []string) 
 	return formattedArgs
 }
 
-// formatImports formatta gli import aggiuntivi
 func (fe *FunctionExecutor) formatImports(importSet map[string]bool) []string {
 	var additionalImports []string
 
@@ -319,9 +289,16 @@ func (fe *FunctionExecutor) formatImports(importSet map[string]bool) []string {
 	return additionalImports
 }
 
-// executeCode esegue il codice generato
 func (fe *FunctionExecutor) executeCode(tempFile string) (string, error) {
 	cmd := exec.Command("go", "run", tempFile)
+	cmd.Env = os.Environ()
+	var cleanEnv []string
+	for _, env := range cmd.Env {
+		if !strings.HasPrefix(env, "GOFLAGS=") {
+			cleanEnv = append(cleanEnv, env)
+		}
+	}
+	cmd.Env = cleanEnv
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to execute temp program: %v\nOutput:\n%s", err, string(output))
