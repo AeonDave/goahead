@@ -16,6 +16,11 @@ func main() {
 		toolexecManager.RunAsToolexec()
 		return
 	}
+	// If no arguments are provided, show help/usage instead of running codegen
+	if len(os.Args) == 1 {
+		showHelp()
+		return
+	}
 	config := parseFlags()
 
 	if config.Help {
