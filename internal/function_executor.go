@@ -181,23 +181,30 @@ func (fe *FunctionExecutor) resolveImportPath(alias string) (string, bool) {
 
 func (fe *FunctionExecutor) formatArguments(target callTarget, args []argument) ([]string, error) {
 	if target.kind != invocationUser {
-		formatted := make([]string, len(args))
-		for i, arg := range args {
-			formatted[i] = argDisplayForExternal(arg)
-		}
-		return formatted, nil
+		return formatExternalArguments(args), nil
 	}
+	return formatUserArguments(target.userFunc, args)
+}
 
-	expected := target.userFunc.InputTypes
+func formatExternalArguments(args []argument) []string {
+	formatted := make([]string, len(args))
+	for i, arg := range args {
+		formatted[i] = argDisplayForExternal(arg)
+	}
+	return formatted
+}
+
+func formatUserArguments(fn *UserFunction, args []argument) ([]string, error) {
+	expected := fn.InputTypes
 	if len(expected) != len(args) {
-		return nil, fmt.Errorf("function %s expects %d arguments, got %d", target.userFunc.Name, len(expected), len(args))
+		return nil, fmt.Errorf("function %s expects %d arguments, got %d", fn.Name, len(expected), len(args))
 	}
 
 	formatted := make([]string, len(args))
 	for i, typ := range expected {
 		value, err := formatArgumentForType(args[i], typ)
 		if err != nil {
-			return nil, fmt.Errorf("argument %d for %s: %w", i, target.userFunc.Name, err)
+			return nil, fmt.Errorf("argument %d for %s: %w", i, fn.Name, err)
 		}
 		formatted[i] = value
 	}

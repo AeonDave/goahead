@@ -25,14 +25,42 @@ build: increment-version
 .PHONY: increment-version
 increment-version:
 	@echo "Incrementing build version..."
-	@current_version=$$(grep 'Version = ' internal/constants.go | sed 's/.*"\([^"]*\)".*/\1/'); \
-	major=$$(echo $$current_version | cut -d. -f1); \
-	minor=$$(echo $$current_version | cut -d. -f2); \
-	patch=$$(echo $$current_version | cut -d. -f3); \
-	new_patch=$$((patch + 1)); \
-	new_version="$$major.$$minor.$$new_patch"; \
-	echo "Updating version from $$current_version to $$new_version"; \
-	sed -i 's/Version = "[^"]*"/Version = "'$$new_version'"/' internal/constants.go
+	@go run - <<'EOF'
+package main
+
+import (
+    "fmt"
+    "os"
+    "regexp"
+    "strconv"
+)
+
+func main() {
+    const file = "internal/constants.go"
+    data, err := os.ReadFile(file)
+    if err != nil {
+        panic(err)
+    }
+
+    re := regexp.MustCompile(`Version\s*=\s*"(\d+)\.(\d+)\.(\d+)"`)
+    matches := re.FindSubmatch(data)
+    if matches == nil {
+        panic("could not find version in internal/constants.go")
+    }
+
+    major, _ := strconv.Atoi(string(matches[1]))
+    minor, _ := strconv.Atoi(string(matches[2]))
+    patch, _ := strconv.Atoi(string(matches[3]))
+    newVersion := fmt.Sprintf("%d.%d.%d", major, minor, patch+1)
+
+    fmt.Printf("Updating version from %d.%d.%d to %s\n", major, minor, patch, newVersion)
+
+    updated := re.ReplaceAll(data, []byte(fmt.Sprintf(`Version = "%s"`, newVersion)))
+    if err := os.WriteFile(file, updated, 0o644); err != nil {
+        panic(err)
+    }
+}
+EOF
 
 # Build without version increment
 .PHONY: build-no-version
@@ -61,9 +89,9 @@ endif
 
 # Test the tool (create a simple test)
 .PHONY: test
-test: build
-	@echo "Testing goahead build..."
-	@echo "GoAhead built successfully. Use 'goahead -h' for usage help."
+test:
+	@echo "Running unit and integration tests..."
+	go test ./...
 
 # Test as toolexec (requires installation)
 .PHONY: test-toolexec
@@ -100,12 +128,13 @@ help:
 	@echo "Available targets:"
 	@echo "  build         - Build for current platform"
 	@echo "  install       - Install goahead locally"
-	@echo "  test          - Test goahead in standalone mode"
+	@echo "  test          - Run go test ./..."
 	@echo "  test-toolexec - Test goahead as toolexec"
 	@echo "  build-cross   - Cross-compile for multiple platforms"
 	@echo "  clean         - Clean build artifacts"
 	@echo "  setup         - Setup project dependencies"
 	@echo "  help          - Show this help"
-	@echo ""	@echo "Usage after installation:"
+	@echo ""
+	@echo "Usage after installation:"
 	@echo "  go install github.com/AeonDave/goahead@latest"
-	@echo "  go build -toolexec=\"goahead\" main.go"
+	@echo "  go build -toolexec=\"goahead\" ./..."

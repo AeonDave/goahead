@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -17,6 +18,11 @@ type CodeProcessor struct {
 var (
 	assignmentPattern      = regexp.MustCompile(`^\s*(var\s+\w+(\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*`)
 	assignmentSplitPattern = regexp.MustCompile(`^(\s*(?:var\s+\w+(?:\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*)(.*)$`)
+	stringLiteralPattern   = regexp.MustCompile(`""`)
+	numericZeroPattern     = regexp.MustCompile(`\b0\b`)
+	floatZeroPattern       = regexp.MustCompile(`\b0\.0\b`)
+	boolFalsePattern       = regexp.MustCompile(`\bfalse\b`)
+	errNoReplacement       = errors.New("no replacement performed")
 )
 
 func NewCodeProcessor(ctx *ProcessorContext, executor *FunctionExecutor) *CodeProcessor {
@@ -95,59 +101,80 @@ func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath strin
 		return line, false
 	}
 
-	typeHint := "other"
-	if userFunc, ok := cp.ctx.Functions[funcName]; ok {
-		typeHint = mapOutputType(userFunc.OutputType)
-	}
-
-	inferred := inferResultKind(result)
-	if typeHint == "other" {
-		typeHint = inferred
-	}
-
+	typeHint := cp.typeHintFor(funcName, result)
 	formattedResult := formatResultForReplacement(result, typeHint)
 
-	trimmedLine := strings.TrimSpace(line)
-	leadingWhitespace := ""
-	if len(line) > len(trimmedLine) {
-		leadingWhitespace = line[:len(line)-len(trimmedLine)]
-	}
-
-	isAssignment := assignmentPattern.MatchString(line)
-
-	var newLine string
-	if isAssignment {
-		matches := assignmentSplitPattern.FindStringSubmatch(line)
-
-		if len(matches) >= 3 {
-			varAssignPart := matches[1]
-			expressionPart := matches[2]
-			replacedExpression := cp.replaceFirstPlaceholder(expressionPart, formattedResult, typeHint)
-			if replacedExpression != expressionPart {
-				newLine = varAssignPart + replacedExpression
-			} else {
-				newLine = varAssignPart + formattedResult
-			}
-		} else {
-			replacement := cp.replaceFunctionCall(line, funcName, argsStr, formattedResult)
-			if replacement == line {
-				_, _ = fmt.Fprintf(os.Stderr, "Warning: Could not replace function call for '%s' in line: %s\n", funcName, strings.TrimSpace(line))
-				return line, false
-			}
-			newLine = replacement
+	leadingWhitespace, _ := splitLeadingWhitespace(line)
+	newLine, replaced, buildErr := cp.buildReplacementLine(line, leadingWhitespace, funcName, argsStr, formattedResult, typeHint)
+	if buildErr != nil {
+		if errors.Is(buildErr, errNoReplacement) {
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: Could not replace function call for '%s' in line: %s\n", funcName, strings.TrimSpace(line))
 		}
-	} else {
-		newLine = leadingWhitespace + formattedResult
+		return line, false
 	}
 
-	replaced := newLine != line
 	if replaced {
 		_, _ = fmt.Fprintf(os.Stderr, "[goahead] Replaced in %s: %s(%s) -> %s\n", filePath, funcName, argsStr, result)
 		if verbose {
 			_, _ = fmt.Fprintf(os.Stderr, "  Original: '%s'\n  New: '%s'\n", strings.TrimSpace(line), strings.TrimSpace(newLine))
 		}
 	}
+
 	return newLine, replaced
+}
+
+func splitLeadingWhitespace(line string) (string, string) {
+	trimmed := strings.TrimSpace(line)
+	if len(line) == len(trimmed) {
+		return "", line
+	}
+	return line[:len(line)-len(trimmed)], trimmed
+}
+
+func (cp *CodeProcessor) buildReplacementLine(originalLine, leadingWhitespace, funcName, argsStr, formattedResult, typeHint string) (string, bool, error) {
+	if assignmentPattern.MatchString(originalLine) {
+		return cp.replaceInAssignment(originalLine, funcName, argsStr, formattedResult, typeHint)
+	}
+
+	if replacedLine, ok := cp.replaceFunctionCall(originalLine, funcName, argsStr, formattedResult); ok {
+		return replacedLine, true, nil
+	}
+
+	newLine := leadingWhitespace + formattedResult
+	return newLine, newLine != originalLine, nil
+}
+
+func (cp *CodeProcessor) replaceInAssignment(originalLine, funcName, argsStr, formattedResult, typeHint string) (string, bool, error) {
+	matches := assignmentSplitPattern.FindStringSubmatch(originalLine)
+	if len(matches) < 3 {
+		replacedLine, ok := cp.replaceFunctionCall(originalLine, funcName, argsStr, formattedResult)
+		if !ok {
+			return "", false, errNoReplacement
+		}
+		return replacedLine, true, nil
+	}
+
+	varAssignPart := matches[1]
+	expressionPart := matches[2]
+
+	replacedExpression, replaced := cp.replaceFirstPlaceholder(expressionPart, formattedResult, typeHint)
+	if replaced {
+		newLine := varAssignPart + replacedExpression
+		return newLine, newLine != originalLine, nil
+	}
+
+	newLine := varAssignPart + formattedResult
+	return newLine, newLine != originalLine, nil
+}
+
+func (cp *CodeProcessor) typeHintFor(funcName, result string) string {
+	if userFunc, ok := cp.ctx.Functions[funcName]; ok {
+		hint := mapOutputType(userFunc.OutputType)
+		if hint != "other" {
+			return hint
+		}
+	}
+	return inferResultKind(result)
 }
 
 func (cp *CodeProcessor) writeFile(filePath string, lines []string) error {
@@ -183,98 +210,49 @@ func escapeString(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
 
-func (cp *CodeProcessor) replaceFirstPlaceholder(expression, replacement, typeHint string) string {
+func (cp *CodeProcessor) replaceFirstPlaceholder(expression, replacement, typeHint string) (string, bool) {
 	switch typeHint {
 	case "string":
-		re := regexp.MustCompile(`""`)
-		if re.MatchString(expression) {
-			replaced := false
-			return re.ReplaceAllStringFunc(expression, func(match string) string {
-				if !replaced {
-					replaced = true
-					return replacement
-				}
-				return match
-			})
-		}
-
-	case "int":
-		re := regexp.MustCompile(`\b0\b`)
-		if re.MatchString(expression) {
-			replaced := false
-			return re.ReplaceAllStringFunc(expression, func(match string) string {
-				if !replaced {
-					replaced = true
-					return replacement
-				}
-				return match
-			})
-		}
-
-	case "uint":
-		re := regexp.MustCompile(`\b0\b`)
-		if re.MatchString(expression) {
-			replaced := false
-			return re.ReplaceAllStringFunc(expression, func(match string) string {
-				if !replaced {
-					replaced = true
-					return replacement
-				}
-				return match
-			})
-		}
-
+		return replaceFirstMatch(stringLiteralPattern, expression, replacement)
+	case "int", "uint":
+		return replaceFirstMatch(numericZeroPattern, expression, replacement)
 	case "float":
-		re := regexp.MustCompile(`\b0\.0\b`)
-		if re.MatchString(expression) {
-			replaced := false
-			return re.ReplaceAllStringFunc(expression, func(match string) string {
-				if !replaced {
-					replaced = true
-					return replacement
-				}
-				return match
-			})
+		if updated, ok := replaceFirstMatch(floatZeroPattern, expression, replacement); ok {
+			return updated, true
 		}
-		reZero := regexp.MustCompile(`\b0\b`)
-		if reZero.MatchString(expression) {
-			replaced := false
-			return reZero.ReplaceAllStringFunc(expression, func(match string) string {
-				if !replaced {
-					replaced = true
-					return replacement
-				}
-				return match
-			})
-		}
-
+		return replaceFirstMatch(numericZeroPattern, expression, replacement)
 	case "bool":
-		re := regexp.MustCompile(`\bfalse\b`)
-		if re.MatchString(expression) {
-			replaced := false
-			return re.ReplaceAllStringFunc(expression, func(match string) string {
-				if !replaced {
-					replaced = true
-					return replacement
-				}
-				return match
-			})
-		}
+		return replaceFirstMatch(boolFalsePattern, expression, replacement)
+	default:
+		return expression, false
 	}
-	return expression
 }
 
-func (cp *CodeProcessor) replaceFunctionCall(line, funcName, argsStr, replacement string) string {
-	updated := line
+func replaceFirstMatch(re *regexp.Regexp, expression, replacement string) (string, bool) {
+	replaced := false
+	updated := re.ReplaceAllStringFunc(expression, func(match string) string {
+		if replaced {
+			return match
+		}
+		replaced = true
+		return replacement
+	})
+	return updated, replaced
+}
+
+func (cp *CodeProcessor) replaceFunctionCall(line, funcName, argsStr, replacement string) (string, bool) {
 	if argsStr != "" {
 		re := regexp.MustCompile(fmt.Sprintf(`%s\(\s*%s\s*\)`, regexp.QuoteMeta(funcName), regexp.QuoteMeta(argsStr)))
-		updated = re.ReplaceAllString(updated, replacement)
+		if re.MatchString(line) {
+			return re.ReplaceAllString(line, replacement), true
+		}
 	}
-	if updated == line {
-		re := regexp.MustCompile(fmt.Sprintf(`%s\([^)]*\)`, regexp.QuoteMeta(funcName)))
-		updated = re.ReplaceAllString(updated, replacement)
+
+	re := regexp.MustCompile(fmt.Sprintf(`%s\([^)]*\)`, regexp.QuoteMeta(funcName)))
+	if re.MatchString(line) {
+		return re.ReplaceAllString(line, replacement), true
 	}
-	return updated
+	return line, false
 }
 
 func mapOutputType(outputType string) string {

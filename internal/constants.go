@@ -1,7 +1,7 @@
 package internal
 
 const (
-	Version           = "1.0.2"
+	Version           = "1.1.0"
 	FunctionMarker    = "//go:ahead functions"
 	CommentPattern    = `^\s*//\s*:([^:]+)(?::(.*))?`
 	ExecutionTemplate = `package main
@@ -37,23 +37,4 @@ var (
 		"/vendor/",
 		"/pkg/mod/",
 	}
-	//SupportedTypes = []string{
-	//	"string",
-	//	"int",
-	//	"int8",
-	//	"int16",
-	//	"int32",
-	//	"int64",
-	//	"uint",
-	//	"uint8",
-	//	"uint16",
-	//	"uint32",
-	//	"uint64",
-	//	"bool",
-	//	"float32",
-	//	"float64",
-	//	"byte",
-	//	"rune",
-	//}
-	//ExcludedPaths = append(GoInstallPaths, SystemPaths...)
 )

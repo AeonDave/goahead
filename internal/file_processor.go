@@ -181,93 +181,134 @@ func (fp *FileProcessor) IsFunctionFile(path string) bool {
 }
 
 func FilterUserFiles(files []string) []string {
+	ctx := newFilterContext(os.Getenv("GOAHEAD_VERBOSE") == "1")
 	var userFiles []string
-	verbose := os.Getenv("GOAHEAD_VERBOSE") == "1"
-	gopath := os.Getenv("GOPATH")
-	if gopath == "" {
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			gopath = filepath.Join(homeDir, "go")
-		}
-	}
-
-	goroot := os.Getenv("GOROOT")
-	if goroot == "" {
-		cmd := exec.Command("go", "env", "GOROOT")
-		output, err := cmd.Output()
-		if err == nil {
-			goroot = strings.TrimSpace(string(output))
-		}
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "." // Fallback
-	}
-	absCwd, err := filepath.Abs(cwd)
-	if err != nil {
-		absCwd = cwd // Fallback
-	}
-	moduleRoot := findModuleRoot(cwd)
 
 	for _, file := range files {
-		absFile, err := filepath.Abs(file)
-		if err != nil {
-			absFile = file // Fallback if we can't get absolute path
-		}
-		if shouldExcludeFile(absFile, goroot, gopath) {
-			if verbose {
-				_, _ = fmt.Fprintf(os.Stderr, "[goahead] Skipping system file: %s\n", file)
-			}
-			continue
-		}
-		if strings.Contains(file, "/vendor/") || strings.Contains(file, "\\vendor\\") {
-			if verbose {
-				_, _ = fmt.Fprintf(os.Stderr, "[goahead] Skipping vendor file: %s\n", file)
-			}
-			continue
-		}
-		if strings.Contains(file, "/src/") && (strings.Contains(file, "/runtime/") ||
-			strings.Contains(file, "/internal/") || strings.Contains(file, "/crypto/") ||
-			strings.Contains(file, "/encoding/") || strings.Contains(file, "/net/") ||
-			strings.Contains(file, "/os/") || strings.Contains(file, "/fmt/")) {
-			if verbose {
-				_, _ = fmt.Fprintf(os.Stderr, "[goahead] Skipping standard library file: %s\n", file)
-			}
-			continue
-		}
-		if strings.Contains(file, "/test/") || strings.Contains(file, "\\test\\") {
+		include, message := ctx.includeFile(file)
+		if include {
 			userFiles = append(userFiles, file)
-			if verbose {
-				_, _ = fmt.Fprintf(os.Stderr, "[goahead] Including test directory file: %s\n", file)
-			}
-			continue
 		}
-		if strings.HasSuffix(file, "_test.go") {
-			userFiles = append(userFiles, file)
-			if verbose {
-				_, _ = fmt.Fprintf(os.Stderr, "[goahead] Including test file: %s\n", file)
-			}
-			continue
-		}
-		if strings.HasPrefix(file, "./") || filepath.Base(file) == file {
-			userFiles = append(userFiles, file)
-			if verbose {
-				_, _ = fmt.Fprintf(os.Stderr, "[goahead] Including local file: %s\n", file)
-			}
-			continue
-		}
-		if isUserFile(absFile, absCwd, moduleRoot) {
-			userFiles = append(userFiles, file)
-			if verbose {
-				_, _ = fmt.Fprintf(os.Stderr, "[goahead] Including user file: %s\n", file)
-			}
-		} else if verbose {
-			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Skipping non-user file: %s\n", file)
+		if ctx.verbose && message != "" {
+			_, _ = fmt.Fprintln(os.Stderr, message)
 		}
 	}
 
 	return userFiles
+}
+
+type filterContext struct {
+	verbose    bool
+	gopath     string
+	goroot     string
+	absCwd     string
+	moduleRoot string
+}
+
+func newFilterContext(verbose bool) *filterContext {
+	ctx := &filterContext{verbose: verbose}
+	ctx.gopath = determineGoPath()
+	ctx.goroot = determineGoRoot()
+	ctx.absCwd, ctx.moduleRoot = determineWorkspace()
+	return ctx
+}
+
+func determineGoPath() string {
+	gopath := os.Getenv("GOPATH")
+	if gopath != "" {
+		return gopath
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(homeDir, "go")
+}
+
+func determineGoRoot() string {
+	goroot := os.Getenv("GOROOT")
+	if goroot != "" {
+		return goroot
+	}
+	cmd := exec.Command("go", "env", "GOROOT")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func determineWorkspace() (string, string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+	absCwd, err := filepath.Abs(cwd)
+	if err != nil {
+		absCwd = cwd
+	}
+	return absCwd, findModuleRoot(cwd)
+}
+
+func (c *filterContext) includeFile(file string) (bool, string) {
+	absFile := c.absolutePath(file)
+	if shouldExcludeFile(absFile, c.goroot, c.gopath) {
+		return false, fmt.Sprintf("[goahead] Skipping system file: %s", file)
+	}
+	if isVendorPath(file) {
+		return false, fmt.Sprintf("[goahead] Skipping vendor file: %s", file)
+	}
+	if isStdlibPath(file) {
+		return false, fmt.Sprintf("[goahead] Skipping standard library file: %s", file)
+	}
+	if containsTestDirectory(file) {
+		return true, fmt.Sprintf("[goahead] Including test directory file: %s", file)
+	}
+	if strings.HasSuffix(file, "_test.go") {
+		return true, fmt.Sprintf("[goahead] Including test file: %s", file)
+	}
+	if isLocalPath(file) {
+		return true, fmt.Sprintf("[goahead] Including local file: %s", file)
+	}
+	if isUserFile(absFile, c.absCwd, c.moduleRoot) {
+		return true, fmt.Sprintf("[goahead] Including user file: %s", file)
+	}
+	return false, fmt.Sprintf("[goahead] Skipping non-user file: %s", file)
+}
+
+func (c *filterContext) absolutePath(path string) string {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return absPath
+}
+
+func isVendorPath(path string) bool {
+	if strings.Contains(path, "/vendor/") || strings.Contains(path, "\\vendor\\") {
+		return true
+	}
+	return strings.HasPrefix(path, "vendor/") || strings.HasPrefix(path, "vendor\\")
+}
+
+func isStdlibPath(path string) bool {
+	if !strings.Contains(path, "/src/") {
+		return false
+	}
+	for _, segment := range []string{"/runtime/", "/internal/", "/crypto/", "/encoding/", "/net/", "/os/", "/fmt/"} {
+		if strings.Contains(path, segment) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsTestDirectory(path string) bool {
+	return strings.Contains(path, "/test/") || strings.Contains(path, "\\test\\")
+}
+
+func isLocalPath(path string) bool {
+	return strings.HasPrefix(path, "./") || filepath.Base(path) == path
 }
 
 func findModuleRoot(dir string) string {
