@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -12,6 +13,11 @@ type CodeProcessor struct {
 	ctx      *ProcessorContext
 	executor *FunctionExecutor
 }
+
+var (
+	assignmentPattern      = regexp.MustCompile(`^\s*(var\s+\w+(\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*`)
+	assignmentSplitPattern = regexp.MustCompile(`^(\s*(?:var\s+\w+(?:\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*)(.*)$`)
+)
 
 func NewCodeProcessor(ctx *ProcessorContext, executor *FunctionExecutor) *CodeProcessor {
 	return &CodeProcessor{
@@ -89,90 +95,51 @@ func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath strin
 		return line, false
 	}
 
-	userFunc, ok := cp.ctx.Functions[funcName]
-	if !ok {
-		_, _ = fmt.Fprintf(os.Stderr, "Warning: Function definition for '%s' not found in context while processing %s.\n", funcName, filePath)
-		return line, false
+	typeHint := "other"
+	if userFunc, ok := cp.ctx.Functions[funcName]; ok {
+		typeHint = mapOutputType(userFunc.OutputType)
 	}
+
+	inferred := inferResultKind(result)
+	if typeHint == "other" {
+		typeHint = inferred
+	}
+
+	formattedResult := formatResultForReplacement(result, typeHint)
 
 	trimmedLine := strings.TrimSpace(line)
 	leadingWhitespace := ""
 	if len(line) > len(trimmedLine) {
 		leadingWhitespace = line[:len(line)-len(trimmedLine)]
 	}
-	isAssignment := regexp.MustCompile(`^\s*(var\s+\w+(\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*`).MatchString(line)
 
-	var formattedResult string
-	switch userFunc.OutputType {
-	case "string":
-		formattedResult = escapeString(result)
-	case "int", "int8", "int16", "int32", "int64":
-		if strings.Contains(result, ".") {
-			parts := strings.Split(result, ".")
-			formattedResult = parts[0]
-		} else {
-			formattedResult = result
-		}
-	case "uint", "uint8", "uint16", "uint32", "uint64", "byte", "rune":
-		if strings.HasPrefix(result, "-") {
-			_, _ = fmt.Fprintf(os.Stderr, "Warning: Negative value %s used for unsigned type %s, using absolute value\n",
-				result, userFunc.OutputType)
-			formattedResult = strings.TrimPrefix(result, "-")
-		} else if strings.Contains(result, ".") {
-			parts := strings.Split(result, ".")
-			formattedResult = parts[0]
-		} else {
-			formattedResult = result
-		}
-	case "float32", "float64":
-		if !strings.Contains(result, ".") {
-			formattedResult = result + ".0"
-		} else {
-			formattedResult = result
-		}
-	case "bool":
-		if result == "1" || strings.ToLower(result) == "true" {
-			formattedResult = "true"
-		} else {
-			formattedResult = "false"
-		}
-	default:
-		_, _ = fmt.Fprintf(os.Stderr, "Warning: Unknown output type '%s' for function '%s' in %s. Treating as string.\n", userFunc.OutputType, funcName, filePath)
-		formattedResult = escapeString(result)
-	}
+	isAssignment := assignmentPattern.MatchString(line)
 
 	var newLine string
 	if isAssignment {
-		varAssignPattern := regexp.MustCompile(`^(\s*(?:var\s+\w+(?:\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*)(.*)$`)
-		matches := varAssignPattern.FindStringSubmatch(line)
+		matches := assignmentSplitPattern.FindStringSubmatch(line)
 
 		if len(matches) >= 3 {
 			varAssignPart := matches[1]
 			expressionPart := matches[2]
-			replacedExpression := cp.replaceFirstPlaceholder(expressionPart, formattedResult, userFunc.OutputType)
+			replacedExpression := cp.replaceFirstPlaceholder(expressionPart, formattedResult, typeHint)
 			if replacedExpression != expressionPart {
 				newLine = varAssignPart + replacedExpression
 			} else {
 				newLine = varAssignPart + formattedResult
 			}
 		} else {
-			if argsStr != "" {
-				re := regexp.MustCompile(fmt.Sprintf(`%s\(\s*%s\s*\)`, regexp.QuoteMeta(funcName), regexp.QuoteMeta(argsStr)))
-				newLine = re.ReplaceAllString(line, formattedResult)
-			}
-			if newLine == line {
-				re := regexp.MustCompile(fmt.Sprintf(`%s\([^)]*\)`, regexp.QuoteMeta(funcName)))
-				newLine = re.ReplaceAllString(line, formattedResult)
-			}
-			if newLine == line {
-				_, _ = fmt.Fprintf(os.Stderr, "Warning: Could not replace function call for '%s' in line: %s\n",
-					funcName, strings.TrimSpace(line))
+			replacement := cp.replaceFunctionCall(line, funcName, argsStr, formattedResult)
+			if replacement == line {
+				_, _ = fmt.Fprintf(os.Stderr, "Warning: Could not replace function call for '%s' in line: %s\n", funcName, strings.TrimSpace(line))
 				return line, false
 			}
+			newLine = replacement
 		}
 	} else {
 		newLine = leadingWhitespace + formattedResult
 	}
+
 	replaced := newLine != line
 	if replaced {
 		_, _ = fmt.Fprintf(os.Stderr, "[goahead] Replaced in %s: %s(%s) -> %s\n", filePath, funcName, argsStr, result)
@@ -216,18 +183,22 @@ func escapeString(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
 
-func (cp *CodeProcessor) replaceFirstPlaceholder(expression, replacement, outputType string) string {
-	switch outputType {
+func (cp *CodeProcessor) replaceFirstPlaceholder(expression, replacement, typeHint string) string {
+	switch typeHint {
 	case "string":
 		re := regexp.MustCompile(`""`)
 		if re.MatchString(expression) {
+			replaced := false
 			return re.ReplaceAllStringFunc(expression, func(match string) string {
-				// Sostituisce solo la prima occorrenza, poi ritorna l'originale
-				return replacement
+				if !replaced {
+					replaced = true
+					return replacement
+				}
+				return match
 			})
 		}
 
-	case "int", "int8", "int16", "int32", "int64":
+	case "int":
 		re := regexp.MustCompile(`\b0\b`)
 		if re.MatchString(expression) {
 			replaced := false
@@ -240,7 +211,7 @@ func (cp *CodeProcessor) replaceFirstPlaceholder(expression, replacement, output
 			})
 		}
 
-	case "uint", "uint8", "uint16", "uint32", "uint64", "byte", "rune":
+	case "uint":
 		re := regexp.MustCompile(`\b0\b`)
 		if re.MatchString(expression) {
 			replaced := false
@@ -253,7 +224,7 @@ func (cp *CodeProcessor) replaceFirstPlaceholder(expression, replacement, output
 			})
 		}
 
-	case "float32", "float64":
+	case "float":
 		re := regexp.MustCompile(`\b0\.0\b`)
 		if re.MatchString(expression) {
 			replaced := false
@@ -265,10 +236,10 @@ func (cp *CodeProcessor) replaceFirstPlaceholder(expression, replacement, output
 				return match
 			})
 		}
-		re2 := regexp.MustCompile(`\b0\b`)
-		if re2.MatchString(expression) {
+		reZero := regexp.MustCompile(`\b0\b`)
+		if reZero.MatchString(expression) {
 			replaced := false
-			return re2.ReplaceAllStringFunc(expression, func(match string) string {
+			return reZero.ReplaceAllStringFunc(expression, func(match string) string {
 				if !replaced {
 					replaced = true
 					return replacement
@@ -291,4 +262,73 @@ func (cp *CodeProcessor) replaceFirstPlaceholder(expression, replacement, output
 		}
 	}
 	return expression
+}
+
+func (cp *CodeProcessor) replaceFunctionCall(line, funcName, argsStr, replacement string) string {
+	updated := line
+	if argsStr != "" {
+		re := regexp.MustCompile(fmt.Sprintf(`%s\(\s*%s\s*\)`, regexp.QuoteMeta(funcName), regexp.QuoteMeta(argsStr)))
+		updated = re.ReplaceAllString(updated, replacement)
+	}
+	if updated == line {
+		re := regexp.MustCompile(fmt.Sprintf(`%s\([^)]*\)`, regexp.QuoteMeta(funcName)))
+		updated = re.ReplaceAllString(updated, replacement)
+	}
+	return updated
+}
+
+func mapOutputType(outputType string) string {
+	switch outputType {
+	case "string":
+		return "string"
+	case "bool":
+		return "bool"
+	case "float32", "float64":
+		return "float"
+	case "uint", "uint8", "uint16", "uint32", "uint64", "byte", "rune":
+		return "uint"
+	case "int", "int8", "int16", "int32", "int64":
+		return "int"
+	default:
+		return "other"
+	}
+}
+
+func inferResultKind(result string) string {
+	trimmed := strings.TrimSpace(result)
+	lower := strings.ToLower(trimmed)
+	if lower == "true" || lower == "false" {
+		return "bool"
+	}
+	if strings.HasPrefix(trimmed, "\"") && strings.HasSuffix(trimmed, "\"") {
+		return "string"
+	}
+	if _, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return "int"
+	}
+	if _, err := strconv.ParseFloat(trimmed, 64); err == nil {
+		return "float"
+	}
+	return "other"
+}
+
+func formatResultForReplacement(result string, typeHint string) string {
+	trimmed := strings.TrimSpace(result)
+	switch typeHint {
+	case "string":
+		if strings.HasPrefix(trimmed, "\"") && strings.HasSuffix(trimmed, "\"") {
+			return trimmed
+		}
+		return escapeString(trimmed)
+	case "bool":
+		if strings.EqualFold(trimmed, "true") {
+			return "true"
+		}
+		if strings.EqualFold(trimmed, "false") {
+			return "false"
+		}
+		return "false"
+	default:
+		return trimmed
+	}
 }

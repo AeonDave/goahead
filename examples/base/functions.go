@@ -1,7 +1,7 @@
 //go:ahead functions
 //go:build ignore
 
-package main
+package base
 
 import (
 	"crypto/sha256"

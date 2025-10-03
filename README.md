@@ -1,240 +1,130 @@
-# GoAhead - Compile-time Code Generation Tool
+# GoAhead -> Compile-time Code Generation for Go
 
-**Compile-time code generation with intelligent placeholder replacement**
+GoAhead plugs into the Go toolchain and replaces lightweight placeholder comments with real values **before** your code is compiled. Helpers that you keep alongside your project are executed at build time, so your runtime code stays clean while still benefiting from generated constants, strings, configuration, or any other deterministic value.
 
-GoAhead is a powerful Go tool that automatically replaces placeholders in your code with the results of user-defined functions during compilation. It features intelligent replacement that preserves complex expressions while substituting only the specific placeholders.
+[![CodeQL Advanced](https://github.com/AeonDave/goahead/actions/workflows/codeql.yml/badge.svg)](https://github.com/AeonDave/goahead/actions/workflows/codeql.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/AeonDave/goahead)](https://goreportcard.com/report/github.com/AeonDave/goahead)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/AeonDave/goahead)
+![GitHub last commit](https://img.shields.io/github/last-commit/AeonDave/goahead)
+![GitHub License](https://img.shields.io/github/license/AeonDave/goahead)
 
-## Quick Installation & Usage
 
-### 1. Install from GitHub
+## Highlights
+- Works with every Go command via `-toolexec` (build, test, run, generate)
+- Intelligent placeholder replacement keeps surrounding expressions intact
+- Understands parameterised helpers, raw Go expressions, and simple type inference
+- Supports standard-library packages and custom aliases through `//go:ahead import`
+- Ships with ready-to-run examples and an integration test suite
+
+## Installation
 ```bash
 go install github.com/AeonDave/goahead@latest
 ```
 
-### 2. Use with Your Projects
-```bash
-# Automatic code generation during build (recommended)
-go build -toolexec="goahead" ./...
-go test -toolexec="goahead" ./...
-go run -toolexec="goahead" main.go
-
-# Enable verbose output
-GOAHEAD_VERBOSE=1 go build -toolexec="goahead" ./...
-```
-
-This approach:
-- ✅ Runs automatically before compilation
-- ✅ Works with all Go commands (`build`, `test`, `run`)
-- ✅ Requires no manual intervention
-- ✅ Integrates seamlessly with CI/CD pipelines
-- ✅ Processes only your project files (excludes system libraries)
-
-### 1. Create Function Definitions
-Create a file `functions.go` with your custom functions:
-
+## Quick Start
+### 1. Declare build-time helpers
+Helpers live in files marked with both build tags. They are excluded from normal compilation but executed by GoAhead.
 ```go
 //go:build exclude
 //go:ahead functions
 
-package main
+package helpers
 
 import "strings"
 
-// String functions
-func getString() string {
-    return "Hello World"
+func welcome(name string) string {
+    return "Hello, " + strings.ToUpper(name)
 }
 
-func toUpper(msg string) string {
-    return strings.ToUpper(msg)
-}
-
-func concat(a, b string) string {
-    return a + " " + b
-}
-
-// Numeric functions
-func getInt() int {
-    return 42
-}
-
-func addInt(a, b int) int {
-    return a + b
-}
-
-func getFloat() float32 {
-    return 3.14159
-}
-
-// Boolean functions
-func getBool() bool {
-    return true
-}
+func port() int { return 8080 }
 ```
 
-### 2. Use Placeholders in Your Code
-Create your main Go file with placeholders:
-
+### 2. Reference helpers from your code
+Placeholders use the form `//:functionName[:arg1[:argN]]` and attach to the statement they decorate.
 ```go
 package main
 
-import (
-    "fmt"
-    "strings"
+import "fmt"
+
+var (
+    //:welcome:"gopher"
+    greeting = ""
+
+    //:port
+    listenPort = 0
 )
 
 func main() {
-    // ✨ Intelligent replacement preserves complex expressions
-
-    //:getString
-    result1 := strings.ToUpper("")  // → strings.ToUpper("Hello World")
-
-    //:getInt
-    result2 := int(0) + 10         // → int(42) + 10
-
-    //:getBool
-    result3 := !false              // → !true
-
-    //:getFloat
-    result4 := 0.0 * 2.5          // → 3.14159 * 2.5
-
-    fmt.Printf("String: %s\n", result1)     // HELLO WORLD
-    fmt.Printf("Int: %d\n", result2)        // 52
-    fmt.Printf("Bool: %t\n", result3)       // false  
-    fmt.Printf("Float: %.2f\n", result4)    // 7.85
+    fmt.Printf("%s on %d
+", greeting, listenPort)
 }
 ```
-
-### 3. Build with Automatic Code Generation
+Run your normal build and let GoAhead do the rest:
 ```bash
-# Install GoAhead
-go install github.com/AeonDave/goahead@latest
-
-# Build your project with automatic code generation
-go build -toolexec="goahead" .
-
-# Run the generated code
-./your-project
+go build -toolexec="goahead" ./...
 ```
 
-## Replacement Examples
-
-GoAhead intelligently replaces only the placeholders while preserving your expressions:
-
-| Original Code         | After GoAhead              | Result    |
-|-----------------------|----------------------------|-----------|
-| `strings.ToUpper("")` | `strings.ToUpper("Hello")` | `"HELLO"` |
-| `int(0) + 5`          | `int(42) + 5`              | `47`      |
-| `!false`              | `!true`                    | `false`   |
-| `0.0 * 3.14`          | `2.5 * 3.14`               | `7.85`    |
-| `len("") > 0`         | `len("test") > 0`          | `true`    |
-
-## Calling Functions with Parameters
-
-For functions that require parameters, use the colon syntax after the function name:
-
+## Placeholder Grammar
 ```
-//:functionName:arg1:arg2:arg3
+//:functionName[:arg1[:argN]]
 ```
+- Strings use double quotes: `"production"`
+- Numbers and booleans are unquoted: `42`, `3.14`, `true`
+- Prefix with `=` to pass a raw Go expression that should not be quoted: `//:hash:=strings.TrimSpace(input)`
+- Arguments must match the helper signature exactly (GoAhead reports mismatches)
+- The first literal placeholder of the matching type in the following statement/expression is replaced (e.g. the first `""`, `0`, `0.0`, or `false`)
 
-Arguments are separated by colons (`:`) and support different data types:
-
-### Parameter Types
-- **Strings**: enclosed in double quotes `"hello world"`
-- **Numbers**: without quotes `42`, `3.14`
-- **Booleans**: `true` or `false`
-
-### Examples with Parameters
-
+## Using Standard Library & External Packages
+You can call into packages without copying wrappers:
 ```go
-// Function definitions (in functions.go)
-func toUpper(msg string) string {
-    return strings.ToUpper(msg)
-}
-
-func concat(a, b string) string {
-    return a + " " + b
-}
-
-func addInt(a, b int) int {
-    return a + b
-}
-
-func multiply(a float64, b float64) float64 {
-    return a * b
-}
-
-// Usage in your code
-func main() {
-    // String function with one parameter
-    //:toUpper:"hello world"
-    result1 := strings.ToLower("")  // → strings.ToLower("HELLO WORLD")
-
-    // Function with multiple string parameters
-    //:concat:"Hello":"World"
-    result2 := fmt.Sprintf("%s", "")  // → fmt.Sprintf("%s", "Hello World")
-
-    // Numeric function with parameters
-    //:addInt:10:32
-    result3 := int(0) * 2  // → int(42) * 2
-
-    // Float function with parameters
-    //:multiply:3.14:2.0
-    result4 := 0.0 + 1.0  // → 6.28 + 1.0
-
-    fmt.Printf("Upper: %s\n", result1)      // HELLO WORLD
-    fmt.Printf("Concat: %s\n", result2)     // Hello World
-    fmt.Printf("Add: %d\n", result3)        // 84
-    fmt.Printf("Multiply: %.2f\n", result4) // 7.28
-}
+//:os.Getenv:"HOME"
+homeDir := ""
 ```
-
-### Parameter Syntax Rules
-- Arguments must match the function's parameter types exactly
-- String arguments must be enclosed in double quotes
-- Numeric and boolean arguments should not be quoted
-- Arguments are separated by colons with no spaces
-- The number of arguments must match the function definition
-
-## Function Definition Rules
-
-### Requirements
-- Functions must be in files with both `//go:build exclude` and `//go:ahead functions` markers
-- Functions must return exactly one value
-- Function names are case-sensitive and must be unique across all files
-- Use meaningful function names for better code readability
-
-### Supported Types
-| Type                 | Placeholder  | Example                                   |
-|----------------------|--------------|-------------------------------------------|
-| `string`             | `""`         | `func getName() string { return "John" }` |
-| `int`, `int8-64`     | `0`          | `func getAge() int { return 25 }`         |
-| `uint`, `uint8-64`   | `0`          | `func getCount() uint { return 100 }`     |
-| `float32`, `float64` | `0.0` or `0` | `func getPi() float32 { return 3.14 }`    |
-| `bool`               | `false`      | `func isValid() bool { return true }`     |
-
-### Multiple Function Files
-Organize functions across multiple files for better structure:
+GoAhead auto-detects most standard aliases, and you can declare your own for clarity:
+```go
+//go:ahead import http=net/http
+//go:ahead import uuid=github.com/google/uuid
 ```
-project/
-├── auth_functions.go      # Authentication related
-├── data_functions.go      # Data processing  
-├── config_functions.go    # Configuration
-└── main.go                # Your main code
-```
+Place these directives inside any helper file. The alias is available to every placeholder invocation during the same build.
 
-### Manual Usage
+## Intelligent Replacement
+- GoAhead rewrites only the minimal literal placeholder, leaving the surrounding expression untouched.
+- Strings, ints, floats, uints, and bools are formatted automatically; complex output is quoted so it compiles immediately.
+- Results are cached for the duration of the build to avoid re-running identical helpers.
+
+## Project Layout Examples
+Examples live under `examples/` and can be executed with `go run -toolexec="goahead" ./examples/<name>`.
+
+| Directory | Demonstrates |
+|-----------|--------------|
+| `examples/base`   | Minimal helpers returning strings, ints, and derived values |
+| `examples/config` | Generating a configuration struct, sanitising CSV input, and reading env values |
+| `examples/stdlib` | Calling `os.Getenv`, `http.DetectContentType`, and other stdlib helpers via alias directives |
+| `examples/report` | Multi-argument helpers to build status messages, percentages, and slugs |
+
+## Testing
+Integration tests under `test/` spin up temporary modules and assert the emitted Go source. Run them with:
 ```bash
-goahead [options]
-
-Options:
-  -dir string        Directory to process (default ".")
-  -verbose          Enable verbose output  
-  -help             Show help message
-  -version          Show version information
+go test ./test/...
 ```
 
-### Environment Variables
-```bash
-GOAHEAD_VERBOSE=1    # Enable verbose output in toolexec mode
+## Command-line Reference
 ```
+goahead -dir=<path> [-verbose] [-version]
+```
+| Flag      | Description                                   |
+|-----------|-----------------------------------------------|
+| `-dir`    | Directory to process (default `.`)            |
+| `-verbose`| Print detailed progress information           |
+| `-version`| Print the tool version and exit               |
+| `-help`   | Show the extended usage banner                |
+
+GoAhead also respects these environment variables:
+```
+GOAHEAD_VERBOSE=1   # Force verbose output when invoked via toolexec
+```
+
+## Tips
+- Keep helpers deterministic and side-effect free for reproducible builds.
+- Use multiple helper files to organise different domains (config, copy, test data, etc.).
+- Commit the generated placeholders only if you need deterministic review diffs; otherwise regenerate during CI.

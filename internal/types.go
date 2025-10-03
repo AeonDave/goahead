@@ -12,11 +12,12 @@ type UserFunction struct {
 }
 
 type ProcessorContext struct {
-	Functions   map[string]*UserFunction
-	FileSet     *token.FileSet
-	CurrentFile string
-	FuncFiles   []string
-	TempDir     string
+	Functions       map[string]*UserFunction
+	FileSet         *token.FileSet
+	CurrentFile     string
+	FuncFiles       []string
+	TempDir         string
+	ImportOverrides map[string]string
 }
 
 type Config struct {

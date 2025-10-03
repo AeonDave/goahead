@@ -5,19 +5,23 @@ const (
 	FunctionMarker    = "//go:ahead functions"
 	CommentPattern    = `^\s*//\s*:([^:]+)(?::(.*))?`
 	ExecutionTemplate = `package main
-	
-	import (
-	 "fmt"
-	{{.AdditionalImports}}
-	)
-	
-	{{.UserFunctions}}
-	
-	func main() {
-	 result := {{.FuncName}}({{.Args}})
-	 fmt.Print(result)
-	}
-	`
+
+import (
+	{{.FmtAlias}} "fmt"
+{{- range .Imports}}
+	{{.}}
+{{- end}}
+)
+
+{{- if .UserCode}}
+{{.UserCode}}
+
+{{- end}}
+func main() {
+	result := {{.CallExpr}}
+	{{.FmtAlias}}.Printf("%#v", result)
+}
+`
 )
 
 var (

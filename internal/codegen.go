@@ -15,8 +15,9 @@ func RunCodegen(dir string, verbose bool) error {
 		fmt.Printf("  verbose: %t\n", verbose)
 	}
 	ctx := &ProcessorContext{
-		Functions: make(map[string]*UserFunction),
-		FileSet:   token.NewFileSet(),
+		Functions:       make(map[string]*UserFunction),
+		FileSet:         token.NewFileSet(),
+		ImportOverrides: make(map[string]string),
 	}
 	tempDir, err := os.MkdirTemp("", "codegen-*")
 	if err != nil {
@@ -42,6 +43,9 @@ func RunCodegen(dir string, verbose bool) error {
 
 	if err := fileProcessor.LoadUserFunctions(); err != nil {
 		return fmt.Errorf("failed to load user functions: %v", err)
+	}
+	if err := executor.Prepare(); err != nil {
+		return fmt.Errorf("failed to prepare executor: %v", err)
 	}
 	if verbose {
 		printLoadedInfo(ctx)
