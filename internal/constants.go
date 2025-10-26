@@ -17,8 +17,12 @@ import (
 {{.UserCode}}
 
 {{- end}}
+func goaheadFirst[T any](v T, _ ...any) T {
+	return v
+}
+
 func main() {
-	result := {{.CallExpr}}
+	result := goaheadFirst({{.CallExpr}})
 	{{.FmtAlias}}.Printf("%#v", result)
 }
 `

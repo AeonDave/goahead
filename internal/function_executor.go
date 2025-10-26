@@ -62,6 +62,7 @@ type FunctionExecutor struct {
 	prepared            bool
 
 	stdImportMap map[string]string
+	stdListErr   error
 }
 
 func NewFunctionExecutor(ctx *ProcessorContext) *FunctionExecutor {
@@ -114,7 +115,15 @@ func (fe *FunctionExecutor) ExecuteFunction(funcName string, argsStr string) (st
 	result, err := fe.executeProgram(program)
 	if err != nil {
 		if target.kind == invocationExternal && !target.importResolved {
-			return "", fmt.Errorf("%w. Add //go:ahead import %s=%s in a function file to declare the package alias", err, target.packageAlias, target.packagePath)
+			suggestion := fmt.Sprintf("%s=%s", target.packageAlias, target.packagePath)
+			if target.packagePath == target.packageAlias && fe.stdListErr != nil {
+				suggestion = fmt.Sprintf("%s=<import path>", target.packageAlias)
+			}
+			extra := ""
+			if fe.stdListErr != nil {
+				extra = fmt.Sprintf(" (automatic standard library resolution failed: %v)", fe.stdListErr)
+			}
+			return "", fmt.Errorf("%w. Add //go:ahead import %s in a function file to declare the package alias%s", err, suggestion, extra)
 		}
 		return "", err
 	}
@@ -605,6 +614,12 @@ func (fe *FunctionExecutor) ensureStdImportMap() {
 	cmd.Env = sanitizeGoEnv(os.Environ())
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		trimmed := strings.TrimSpace(string(output))
+		if trimmed != "" {
+			fe.stdListErr = fmt.Errorf("go list std: %w: %s", err, trimmed)
+		} else {
+			fe.stdListErr = fmt.Errorf("go list std: %w", err)
+		}
 		return
 	}
 

@@ -62,6 +62,7 @@ func (cp *CodeProcessor) processLines(file *os.File, filePath string, verbose bo
 
 	commentPattern := regexp.MustCompile(CommentPattern)
 
+Outer:
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -74,17 +75,26 @@ func (cp *CodeProcessor) processLines(file *os.File, filePath string, verbose bo
 
 			lines = append(lines, line)
 
-			if scanner.Scan() {
+			for {
+				if !scanner.Scan() {
+					break Outer
+				}
 				nextLine := scanner.Text()
+				if strings.TrimSpace(nextLine) == "" {
+					lines = append(lines, nextLine)
+					continue
+				}
 				newLine, wasModified := cp.processCodeLine(nextLine, funcName, argsStr, filePath, verbose)
 				lines = append(lines, newLine)
 				if wasModified {
 					modified = true
 				}
+				break
 			}
-		} else {
-			lines = append(lines, line)
+			continue
 		}
+
+		lines = append(lines, line)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -204,6 +214,11 @@ func (cp *CodeProcessor) writeFile(filePath string, lines []string) error {
 }
 
 func escapeString(s string) string {
+	if strings.Contains(s, "`") {
+		escaped := strings.ReplaceAll(s, "\\", "\\\\")
+		escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
+		return `"` + escaped + `"`
+	}
 	if strings.Contains(s, "\\") {
 		return "`" + s + "`"
 	}
