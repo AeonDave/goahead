@@ -86,3 +86,73 @@ func main() {
 		}
 	}
 }
+
+func TestRunCodegenSkipsBlankLinesAfterComment(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func makeGreeting(name string) string { return "Hello, " + name }
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+var (
+    //:makeGreeting:"gopher"
+
+    greeting = ""
+)
+`)
+
+	if err := internal.RunCodegen(dir, false); err != nil {
+		t.Fatalf("RunCodegen failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	got := string(content)
+
+	expected := "//:makeGreeting:\"gopher\"\n\n    greeting = \"Hello, gopher\""
+	if !strings.Contains(got, expected) {
+		t.Fatalf("output missing expected block\nwant:\n%s\n---- got ----\n%s", expected, got)
+	}
+}
+
+func TestRunCodegenHandlesMultiReturnFunctions(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func fetchValue() (string, error) { return "multi", nil }
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+var (
+    //:fetchValue
+    result = ""
+)
+`)
+
+	if err := internal.RunCodegen(dir, false); err != nil {
+		t.Fatalf("RunCodegen failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	got := string(content)
+
+	if !strings.Contains(got, `result = "multi"`) {
+		t.Fatalf("result assignment not replaced\n---- got ----\n%s", got)
+	}
+}
