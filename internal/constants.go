@@ -17,8 +17,16 @@ import (
 {{.UserCode}}
 
 {{- end}}
-func goaheadFirst[T any](v T, _ ...any) T {
-	return v
+func goaheadFirst[T any](v T, rest ...any) T {
+        for _, candidate := range rest {
+                if candidate == nil {
+                        continue
+                }
+                if err, ok := candidate.(error); ok && err != nil {
+                        panic(err)
+                }
+        }
+        return v
 }
 
 func main() {

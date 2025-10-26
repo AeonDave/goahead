@@ -156,3 +156,33 @@ var (
 		t.Fatalf("result assignment not replaced\n---- got ----\n%s", got)
 	}
 }
+
+func TestRunCodegenFailsWhenHelperReturnsError(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+import "errors"
+
+func fetchValue() (string, error) { return "", errors.New("boom") }
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+var (
+    //:fetchValue
+    result = ""
+)
+`)
+
+	err := internal.RunCodegen(dir, false)
+	if err == nil {
+		t.Fatalf("expected RunCodegen to fail when helper returns non-nil error")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected helper error to propagate, got: %v", err)
+	}
+}

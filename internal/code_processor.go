@@ -84,7 +84,10 @@ Outer:
 					lines = append(lines, nextLine)
 					continue
 				}
-				newLine, wasModified := cp.processCodeLine(nextLine, funcName, argsStr, filePath, verbose)
+				newLine, wasModified, execErr := cp.processCodeLine(nextLine, funcName, argsStr, filePath, verbose)
+				if execErr != nil {
+					return nil, false, execErr
+				}
 				lines = append(lines, newLine)
 				if wasModified {
 					modified = true
@@ -104,11 +107,10 @@ Outer:
 	return lines, modified, nil
 }
 
-func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath string, verbose bool) (string, bool) {
+func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath string, verbose bool) (string, bool, error) {
 	result, err := cp.executor.ExecuteFunction(funcName, argsStr)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Warning: Could not execute function '%s' in %s: %v\n", funcName, filePath, err)
-		return line, false
+		return line, false, fmt.Errorf("failed to execute function '%s' in %s: %w", funcName, filePath, err)
 	}
 
 	typeHint := cp.typeHintFor(funcName, result)
@@ -120,7 +122,7 @@ func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath strin
 		if errors.Is(buildErr, errNoReplacement) {
 			_, _ = fmt.Fprintf(os.Stderr, "Warning: Could not replace function call for '%s' in line: %s\n", funcName, strings.TrimSpace(line))
 		}
-		return line, false
+		return line, false, nil
 	}
 
 	if replaced {
@@ -130,7 +132,7 @@ func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath strin
 		}
 	}
 
-	return newLine, replaced
+	return newLine, replaced, nil
 }
 
 func splitLeadingWhitespace(line string) (string, string) {
@@ -215,14 +217,12 @@ func (cp *CodeProcessor) writeFile(filePath string, lines []string) error {
 
 func escapeString(s string) string {
 	if strings.Contains(s, "`") {
-		escaped := strings.ReplaceAll(s, "\\", "\\\\")
-		escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
-		return `"` + escaped + `"`
+		return strconv.Quote(s)
 	}
 	if strings.Contains(s, "\\") {
 		return "`" + s + "`"
 	}
-	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+	return strconv.Quote(s)
 }
 
 func (cp *CodeProcessor) replaceFirstPlaceholder(expression, replacement, typeHint string) (string, bool) {
