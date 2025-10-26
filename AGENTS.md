@@ -1,10 +1,8 @@
 # GoAhead Agents Guide
 
-This document directs AI contributors working in the GoAhead repository.
-
 ## Repository Overview
 
-- `go.mod`: Declares the `github.com/AeonDave/goahead` module targeting Go 1.21.
+- `go.mod`: Declares the `github.com/AeonDave/goahead` module targeting Go 1.22+.
 - `main.go`: Command-line entry point that orchestrates toolexec or standalone execution.
 - `internal/`: Core library for code generation, toolexec integration, and helper execution.
 - `examples/`: Minimal projects demonstrating how to invoke GoAhead during builds.
@@ -14,7 +12,7 @@ This document directs AI contributors working in the GoAhead repository.
 
 ## Coding Standards
 
-- Write Go 1.21-compatible code and stick to the standard library unless an exception is documented.
+- Write Go code and stick to the standard library unless an exception is documented.
 - Run `gofmt` on any touched Go source; keep imports grouped and sorted.
 - Prefer explicit error handling over panics in library code and return contextual errors (`fmt.Errorf` with `%w`).
 - Maintain deterministic behaviour: helper execution and code rewriting should be reproducible for identical inputs.
@@ -54,4 +52,5 @@ Include any additional project-specific scripts (e.g., `make test`, `make lint`)
 
 - Summarise behavioural changes, highlighting impacts on code generation, CLI flags, or helper execution.
 - Document user-facing updates in `README.md` or example projects when behaviour shifts.
+- Update this AGENTS.md guide with any relevant changes.
 - Ensure new helpers or transformations include regression tests and, where necessary, example coverage.
