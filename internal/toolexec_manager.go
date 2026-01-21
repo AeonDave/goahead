@@ -39,7 +39,8 @@ func (tm *ToolexecManager) RunAsToolexec() {
 			return
 		}
 
-		if !versionShown {
+		verbose := os.Getenv("GOAHEAD_VERBOSE") == "1"
+		if verbose && !versionShown {
 			_, _ = fmt.Fprintf(os.Stderr, "[goahead] GoAhead Code Generator %s\n", Version)
 			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Processing user code with intelligent code generation\n")
 			versionShown = true

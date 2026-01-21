@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/AeonDave/goahead/internal"
@@ -47,21 +48,36 @@ func isToolexecMode() bool {
 	if len(os.Args) < 2 {
 		return false
 	}
-	// If first arg starts with "-", it's a flag, not toolexec mode
-	if strings.HasPrefix(os.Args[1], "-") {
+	// In toolexec mode, Go passes the tool path as an argument. Scan for the first
+	// non-flag argument and accept any executable that looks like a Go tool.
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		if looksLikeGoTool(arg) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeGoTool(arg string) bool {
+	if strings.Contains(arg, "go"+string(os.PathSeparator)+"pkg"+string(os.PathSeparator)+"tool") {
+		return true
+	}
+	base := filepath.Base(arg)
+	if strings.HasSuffix(strings.ToLower(base), ".exe") {
+		base = base[:len(base)-4]
+	}
+	switch strings.ToLower(base) {
+	case "compile", "link", "asm", "cgo", "pack", "buildid",
+		"addr2line", "api", "cover", "dist", "doc", "fix", "nm",
+		"objdump", "pprof", "test2json", "trace", "vet":
+		return true
+	default:
 		return false
 	}
-	// In toolexec mode, Go passes the tool path as first argument
-	// The tool is typically in GOROOT/pkg/tool/GOOS_GOARCH/
-	// Accept any executable that looks like a Go tool
-	arg := os.Args[1]
-	return strings.Contains(arg, "go"+string(os.PathSeparator)+"pkg"+string(os.PathSeparator)+"tool") ||
-		strings.HasSuffix(arg, "compile") || strings.HasSuffix(arg, "compile.exe") ||
-		strings.HasSuffix(arg, "link") || strings.HasSuffix(arg, "link.exe") ||
-		strings.HasSuffix(arg, "asm") || strings.HasSuffix(arg, "asm.exe") ||
-		strings.HasSuffix(arg, "cgo") || strings.HasSuffix(arg, "cgo.exe") ||
-		strings.HasSuffix(arg, "pack") || strings.HasSuffix(arg, "pack.exe") ||
-		strings.HasSuffix(arg, "buildid") || strings.HasSuffix(arg, "buildid.exe")
 }
 
 func parseFlags() *internal.Config {
