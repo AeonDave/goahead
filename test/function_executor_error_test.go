@@ -9,11 +9,11 @@ import (
 
 func TestExecuteFunctionReportsStdlibResolutionFailure(t *testing.T) {
 	ctx := &internal.ProcessorContext{
-		Functions:      make(map[string]*internal.UserFunction),
-		FunctionsByDir: make(map[string]map[string]*internal.UserFunction),
-		RootDir:        t.TempDir(),
-		FuncFiles:      nil,
-		TempDir:        t.TempDir(),
+		FunctionsByDir:   make(map[string]map[string]*internal.UserFunction),
+		FunctionsByDepth: make(map[int]map[string]*internal.UserFunction),
+		RootDir:          t.TempDir(),
+		FuncFiles:        nil,
+		TempDir:          t.TempDir(),
 	}
 	executor := internal.NewFunctionExecutor(ctx)
 

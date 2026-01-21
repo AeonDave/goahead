@@ -258,8 +258,9 @@ var s = ""
 	}
 }
 
-// TestHierarchySiblingIsolation tests that sibling directories don't share functions
-func TestHierarchySiblingIsolation(t *testing.T) {
+// TestHierarchySiblingVisibility tests that sibling directories at the same depth share functions
+// With depth-based resolution, functions at the same depth are visible to all files at or below that depth
+func TestHierarchySiblingVisibility(t *testing.T) {
 	dir := t.TempDir()
 
 	// Root helper (shared)
@@ -289,7 +290,7 @@ package main
 func pkg2Func() string { return "pkg2-func" }
 `)
 
-	// pkg1 source - should see common and pkg1Func, NOT pkg2Func
+	// pkg1 source - with depth-based resolution, sees all functions at depth 0 and depth 1
 	writeFile(t, dir, "pkg1/main.go", `package main
 
 //:common
@@ -302,7 +303,7 @@ var p1 = ""
 var p2 = ""
 `)
 
-	// pkg2 source - should see common and pkg2Func, NOT pkg1Func
+	// pkg2 source - with depth-based resolution, sees all functions at depth 0 and depth 1
 	writeFile(t, dir, "pkg2/main.go", `package main
 
 //:common
@@ -320,7 +321,7 @@ var p1 = ""
 		t.Fatalf("RunCodegen failed: %v", err)
 	}
 
-	// Check pkg1
+	// Check pkg1 - now sees ALL functions at depth 0 and depth 1
 	pkg1Content, _ := os.ReadFile(filepath.Join(dir, "pkg1/main.go"))
 	if !strings.Contains(string(pkg1Content), `"common"`) {
 		t.Errorf("pkg1 should see common, got: %s", pkg1Content)
@@ -328,11 +329,12 @@ var p1 = ""
 	if !strings.Contains(string(pkg1Content), `"pkg1-func"`) {
 		t.Errorf("pkg1 should see pkg1Func, got: %s", pkg1Content)
 	}
-	if strings.Contains(string(pkg1Content), `"pkg2-func"`) {
-		t.Errorf("pkg1 should NOT see pkg2Func, got: %s", pkg1Content)
+	// NEW: With depth-based resolution, pkg1 CAN see pkg2Func (same depth)
+	if !strings.Contains(string(pkg1Content), `"pkg2-func"`) {
+		t.Errorf("pkg1 should see pkg2Func (same depth), got: %s", pkg1Content)
 	}
 
-	// Check pkg2
+	// Check pkg2 - now sees ALL functions at depth 0 and depth 1
 	pkg2Content, _ := os.ReadFile(filepath.Join(dir, "pkg2/main.go"))
 	if !strings.Contains(string(pkg2Content), `"common"`) {
 		t.Errorf("pkg2 should see common, got: %s", pkg2Content)
@@ -340,8 +342,9 @@ var p1 = ""
 	if !strings.Contains(string(pkg2Content), `"pkg2-func"`) {
 		t.Errorf("pkg2 should see pkg2Func, got: %s", pkg2Content)
 	}
-	if strings.Contains(string(pkg2Content), `"pkg1-func"`) {
-		t.Errorf("pkg2 should NOT see pkg1Func, got: %s", pkg2Content)
+	// NEW: With depth-based resolution, pkg2 CAN see pkg1Func (same depth)
+	if !strings.Contains(string(pkg2Content), `"pkg1-func"`) {
+		t.Errorf("pkg2 should see pkg1Func (same depth), got: %s", pkg2Content)
 	}
 }
 

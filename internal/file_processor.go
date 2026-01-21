@@ -98,13 +98,6 @@ func (fp *FileProcessor) processFunctionDeclaration(fn *ast.FuncDecl, filePath s
 
 	funcName := fn.Name.Name
 
-	userFunc := &UserFunction{
-		Name:       funcName,
-		InputTypes: fp.extractInputTypes(fn),
-		OutputType: fp.extractOutputType(fn),
-		FilePath:   filePath,
-	}
-
 	// Get directory of the helper file
 	funcDir := filepath.Dir(filePath)
 	absDir, err := filepath.Abs(funcDir)
@@ -112,9 +105,23 @@ func (fp *FileProcessor) processFunctionDeclaration(fn *ast.FuncDecl, filePath s
 		absDir = funcDir
 	}
 
-	// Initialize map for this directory if needed
+	// Calculate depth relative to RootDir
+	depth := fp.ctx.CalculateDepth(absDir)
+
+	userFunc := &UserFunction{
+		Name:       funcName,
+		InputTypes: fp.extractInputTypes(fn),
+		OutputType: fp.extractOutputType(fn),
+		FilePath:   filePath,
+		Depth:      depth,
+	}
+
+	// Initialize maps if needed
 	if fp.ctx.FunctionsByDir[absDir] == nil {
 		fp.ctx.FunctionsByDir[absDir] = make(map[string]*UserFunction)
+	}
+	if fp.ctx.FunctionsByDepth[depth] == nil {
+		fp.ctx.FunctionsByDepth[depth] = make(map[string]*UserFunction)
 	}
 
 	// Check for duplicate in same directory (this is an error)
@@ -126,31 +133,36 @@ func (fp *FileProcessor) processFunctionDeclaration(fn *ast.FuncDecl, filePath s
 		os.Exit(1)
 	}
 
-	// Check for shadowing (warning only)
-	fp.checkShadowing(funcName, absDir, filePath)
+	// Check for duplicate at same depth (different directories) - this is now an error
+	if existingFunc, exists := fp.ctx.FunctionsByDepth[depth][funcName]; exists {
+		_, _ = fmt.Fprintf(os.Stderr, "ERROR: Duplicate function '%s' at same depth level %d!\n"+
+			"  - First definition: %s\n"+
+			"  - Second definition: %s\n"+
+			"  Hint: Functions at the same depth level must have unique names.\n",
+			funcName, depth, existingFunc.FilePath, filePath)
+		os.Exit(1)
+	}
+
+	// Check for shadowing (function at deeper level shadows one at shallower level)
+	fp.checkShadowing(funcName, depth, filePath)
+
+	// Store in depth-specific map
+	fp.ctx.FunctionsByDepth[depth][funcName] = userFunc
 
 	// Store in directory-specific map
 	fp.ctx.FunctionsByDir[absDir][funcName] = userFunc
-
-	// Also store in flat map for backward compatibility
-	fp.ctx.Functions[funcName] = userFunc
 }
 
-// checkShadowing warns if this function shadows one from a parent directory
-func (fp *FileProcessor) checkShadowing(funcName, funcDir, filePath string) {
-	// Walk up from parent directory
-	for dir := parentDir(funcDir); dir != "" && dir != funcDir; dir = parentDir(dir) {
-		if funcs, ok := fp.ctx.FunctionsByDir[dir]; ok {
+// checkShadowing warns if this function shadows one from a shallower depth level
+func (fp *FileProcessor) checkShadowing(funcName string, funcDepth int, filePath string) {
+	// Check all shallower depths (0 to funcDepth-1)
+	for depth := 0; depth < funcDepth; depth++ {
+		if funcs, ok := fp.ctx.FunctionsByDepth[depth]; ok {
 			if existingFunc, exists := funcs[funcName]; exists {
-				_, _ = fmt.Fprintf(os.Stderr, "[goahead] WARNING: Function '%s' in %s shadows function in %s\n",
-					funcName, filePath, existingFunc.FilePath)
+				_, _ = fmt.Fprintf(os.Stderr, "[goahead] WARNING: Function '%s' at depth %d (%s) shadows function at depth %d (%s)\n",
+					funcName, funcDepth, filePath, depth, existingFunc.FilePath)
 				return
 			}
-		}
-
-		// Stop at root
-		if dir == fp.ctx.RootDir || dir == "." {
-			break
 		}
 	}
 }

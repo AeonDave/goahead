@@ -212,16 +212,6 @@ func (cp *CodeProcessor) typeHintForFunc(userFunc *UserFunction, result string) 
 	return inferResultKind(result)
 }
 
-func (cp *CodeProcessor) typeHintFor(funcName, result string) string {
-	if userFunc, ok := cp.ctx.Functions[funcName]; ok {
-		hint := mapOutputType(userFunc.OutputType)
-		if hint != "other" {
-			return hint
-		}
-	}
-	return inferResultKind(result)
-}
-
 func (cp *CodeProcessor) writeFile(filePath string, lines []string) error {
 	file, err := os.Create(filePath)
 	if err != nil {

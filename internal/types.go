@@ -1,7 +1,11 @@
 package internal
 
 import (
+	"fmt"
 	"go/token"
+	"path/filepath"
+	"sort"
+	"strings"
 )
 
 type UserFunction struct {
@@ -9,9 +13,14 @@ type UserFunction struct {
 	InputTypes []string
 	OutputType string
 	FilePath   string
+	Depth      int // Depth relative to RootDir (0 = root)
 }
 
 type ProcessorContext struct {
+	// FunctionsByDepth maps depth level to functions defined at that depth
+	// Key is the depth (0 = root), value is map of function name to function
+	FunctionsByDepth map[int]map[string]*UserFunction
+
 	// FunctionsByDir maps directory path to functions defined in that directory
 	// Key is the absolute directory path, value is map of function name to function
 	FunctionsByDir map[string]map[string]*UserFunction
@@ -22,56 +31,112 @@ type ProcessorContext struct {
 	// Verbose enables detailed logging
 	Verbose bool
 
-	// Legacy: flat map for backward compatibility during transition
-	Functions   map[string]*UserFunction
 	FileSet     *token.FileSet
 	CurrentFile string
 	FuncFiles   []string
 	TempDir     string
 }
 
-// ResolveFunction finds a function by walking up the directory tree from sourceDir.
+// CalculateDepth returns the depth of a directory relative to RootDir
+func (ctx *ProcessorContext) CalculateDepth(dir string) int {
+	// Normalize paths
+	rootClean := filepath.Clean(ctx.RootDir)
+	dirClean := filepath.Clean(dir)
+
+	// If same as root, depth is 0
+	if rootClean == dirClean {
+		return 0
+	}
+
+	// Get relative path
+	rel, err := filepath.Rel(rootClean, dirClean)
+	if err != nil {
+		return 0
+	}
+	if rel == "" || rel == "." {
+		return 0
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return 0
+	}
+
+	// Count separators
+	depth := 0
+	for _, c := range rel {
+		if c == filepath.Separator || c == '/' || c == '\\' {
+			depth++
+		}
+	}
+	// Add 1 for the final component
+	if rel != "" && rel != "." {
+		depth++
+	}
+	return depth
+}
+
+// ResolveFunction finds a function using depth-based resolution.
+// It searches from the source file's depth upward to depth 0.
 // Returns the function and the helper file path it came from.
 func (ctx *ProcessorContext) ResolveFunction(name, sourceDir string) (*UserFunction, string) {
-	// Walk up from sourceDir to RootDir
-	for dir := sourceDir; ; dir = parentDir(dir) {
-		if funcs, ok := ctx.FunctionsByDir[dir]; ok {
+	sourceDepth := ctx.CalculateDepth(sourceDir)
+
+	// Search from sourceDepth down to 0
+	for depth := sourceDepth; depth >= 0; depth-- {
+		if funcs, ok := ctx.FunctionsByDepth[depth]; ok {
 			if fn, ok := funcs[name]; ok {
 				return fn, fn.FilePath
 			}
-		}
-
-		// Stop at root or when we can't go up anymore
-		if dir == ctx.RootDir || dir == "." || dir == "" || dir == parentDir(dir) {
-			break
-		}
-	}
-
-	// Check root directory explicitly (in case sourceDir didn't traverse through it)
-	if funcs, ok := ctx.FunctionsByDir[ctx.RootDir]; ok {
-		if fn, ok := funcs[name]; ok {
-			return fn, fn.FilePath
 		}
 	}
 
 	return nil, ""
 }
 
-// parentDir returns the parent directory of a path
-func parentDir(dir string) string {
-	if dir == "" || dir == "." {
-		return ""
-	}
-	// Find last separator
-	for i := len(dir) - 1; i >= 0; i-- {
-		if dir[i] == '/' || dir[i] == '\\' {
-			if i == 0 {
-				return string(dir[0])
-			}
-			return dir[:i]
+// GetMaxDepth returns the maximum depth with functions defined
+func (ctx *ProcessorContext) GetMaxDepth() int {
+	maxDepth := 0
+	for depth := range ctx.FunctionsByDepth {
+		if depth > maxDepth {
+			maxDepth = depth
 		}
 	}
-	return "."
+	return maxDepth
+}
+
+// GetFunctionCountByDepth returns total functions at a specific depth
+func (ctx *ProcessorContext) GetFunctionCountByDepth(depth int) int {
+	if funcs, ok := ctx.FunctionsByDepth[depth]; ok {
+		return len(funcs)
+	}
+	return 0
+}
+
+// FormatDepthInfo returns a formatted string showing functions by depth
+func (ctx *ProcessorContext) FormatDepthInfo() string {
+	var sb strings.Builder
+	maxDepth := ctx.GetMaxDepth()
+
+	for depth := 0; depth <= maxDepth; depth++ {
+		if funcs, ok := ctx.FunctionsByDepth[depth]; ok && len(funcs) > 0 {
+			sb.WriteString(fmt.Sprintf("  Depth %d:\n", depth))
+			names := make([]string, 0, len(funcs))
+			for name := range funcs {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				fn := funcs[name]
+				if fn.OutputType != "" {
+					sb.WriteString(fmt.Sprintf("    - %s(%s) %s [%s]\n",
+						name, strings.Join(fn.InputTypes, ", "), fn.OutputType, fn.FilePath))
+				} else {
+					sb.WriteString(fmt.Sprintf("    - %s(%s) [%s]\n",
+						name, strings.Join(fn.InputTypes, ", "), fn.FilePath))
+				}
+			}
+		}
+	}
+	return sb.String()
 }
 
 type Config struct {

@@ -60,6 +60,9 @@ type FunctionExecutor struct {
 	// Cache for prepared code per directory
 	preparedByDir map[string]*preparedCode
 
+	// Cache helper files by depth to avoid repeated scans
+	helperFilesByDepth map[int][]string
+
 	stdImportMap map[string]string
 	stdListErr   error
 }
@@ -335,47 +338,48 @@ func (fe *FunctionExecutor) ensurePreparedForDir(sourceDir string) (*preparedCod
 	return prepared, nil
 }
 
-// collectVisibleHelperFiles returns helper files visible from sourceDir, ordered from closest to furthest
+// collectVisibleHelperFiles returns helper files visible from sourceDir using depth-based resolution
+// Files are ordered from deepest (closest to source) to shallowest (depth 0 = root)
 func (fe *FunctionExecutor) collectVisibleHelperFiles(sourceDir string) []string {
 	var result []string
-	dirToFiles := make(map[string][]string)
+	absSourceDir, err := filepath.Abs(sourceDir)
+	if err != nil {
+		absSourceDir = sourceDir
+	}
+	sourceDepth := fe.ctx.CalculateDepth(absSourceDir)
 
-	// Group helper files by directory
+	depthToFiles := fe.helperFilesByDepth
+	if depthToFiles == nil {
+		depthToFiles = fe.buildHelperFilesByDepth()
+		fe.helperFilesByDepth = depthToFiles
+	}
+
+	// Collect files from sourceDepth down to 0
+	// Order: deepest first (for shadowing to work correctly)
+	for depth := sourceDepth; depth >= 0; depth-- {
+		if files, ok := depthToFiles[depth]; ok {
+			result = append(result, files...)
+		}
+	}
+
+	return result
+}
+
+func (fe *FunctionExecutor) buildHelperFilesByDepth() map[int][]string {
+	depthToFiles := make(map[int][]string)
 	for _, file := range fe.ctx.FuncFiles {
 		dir := filepath.Dir(file)
 		absDir, err := filepath.Abs(dir)
 		if err != nil {
 			absDir = dir
 		}
-		dirToFiles[absDir] = append(dirToFiles[absDir], file)
+		depth := fe.ctx.CalculateDepth(absDir)
+		depthToFiles[depth] = append(depthToFiles[depth], file)
 	}
-
-	// Walk up from sourceDir and collect files
-	visited := make(map[string]bool)
-	for dir := sourceDir; ; dir = parentDir(dir) {
-		if visited[dir] {
-			break
-		}
-		visited[dir] = true
-
-		if files, ok := dirToFiles[dir]; ok {
-			result = append(result, files...)
-		}
-
-		// Stop at root
-		if dir == fe.ctx.RootDir || dir == "." || dir == "" || dir == parentDir(dir) {
-			break
-		}
+	for depth := range depthToFiles {
+		sort.Strings(depthToFiles[depth])
 	}
-
-	// Ensure we check RootDir
-	if !visited[fe.ctx.RootDir] {
-		if files, ok := dirToFiles[fe.ctx.RootDir]; ok {
-			result = append(result, files...)
-		}
-	}
-
-	return result
+	return depthToFiles
 }
 
 // filterShadowedFunctions removes function declarations that are already in seenFunctions
@@ -587,8 +591,6 @@ func (fe *FunctionExecutor) processFunctionFileWithNames(path string) (string, m
 	inImportBlock := false
 	braceCount := 0
 	parenCount := 0
-	currentFuncName := ""
-
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
@@ -633,9 +635,9 @@ func (fe *FunctionExecutor) processFunctionFileWithNames(path string) (string, m
 			if strings.HasPrefix(trimmed, "func ") {
 				inBlock = true
 				braceCount = 0
-				currentFuncName = extractFuncName(trimmed)
-				if currentFuncName != "" {
-					funcNames = append(funcNames, currentFuncName)
+				funcName := extractFuncName(trimmed)
+				if funcName != "" {
+					funcNames = append(funcNames, funcName)
 				}
 			} else if strings.HasPrefix(trimmed, "const ") ||
 				strings.HasPrefix(trimmed, "var ") ||
@@ -669,7 +671,6 @@ func (fe *FunctionExecutor) processFunctionFileWithNames(path string) (string, m
 					(!strings.HasSuffix(trimmed, "(") && !strings.HasSuffix(trimmed, "{") && !strings.HasSuffix(trimmed, ",")) {
 					inBlock = false
 					builder.WriteByte('\n')
-					currentFuncName = ""
 				}
 			}
 		}

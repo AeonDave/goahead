@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func RunCodegen(dir string, verbose bool) error {
@@ -23,11 +22,11 @@ func RunCodegen(dir string, verbose bool) error {
 	}
 
 	ctx := &ProcessorContext{
-		Functions:      make(map[string]*UserFunction),
-		FunctionsByDir: make(map[string]map[string]*UserFunction),
-		RootDir:        absDir,
-		Verbose:        verbose,
-		FileSet:        token.NewFileSet(),
+		FunctionsByDir:   make(map[string]map[string]*UserFunction),
+		FunctionsByDepth: make(map[int]map[string]*UserFunction),
+		RootDir:          absDir,
+		Verbose:          verbose,
+		FileSet:          token.NewFileSet(),
 	}
 	tempDir, err := os.MkdirTemp("", "codegen-*")
 	if err != nil {
@@ -85,24 +84,16 @@ func printLoadedInfo(ctx *ProcessorContext) {
 		fmt.Printf("  - %s\n", file)
 	}
 
-	// Show functions organized by directory
+	// Show functions organized by depth
 	totalFuncs := 0
-	for _, funcs := range ctx.FunctionsByDir {
+	for _, funcs := range ctx.FunctionsByDepth {
 		totalFuncs += len(funcs)
 	}
-	dirWord := "directories"
-	if len(ctx.FunctionsByDir) == 1 {
-		dirWord = "directory"
+	maxDepth := ctx.GetMaxDepth()
+	depthWord := "depth levels"
+	if maxDepth == 0 {
+		depthWord = "depth level"
 	}
-	fmt.Printf("Loaded %d user functions in %d %s:\n", totalFuncs, len(ctx.FunctionsByDir), dirWord)
-	for dir, funcs := range ctx.FunctionsByDir {
-		fmt.Printf("  Directory: %s\n", dir)
-		for name, fn := range funcs {
-			if fn.OutputType != "" {
-				fmt.Printf("    - %s(%s) %s\n", name, strings.Join(fn.InputTypes, ", "), fn.OutputType)
-			} else {
-				fmt.Printf("    - %s(%s)\n", name, strings.Join(fn.InputTypes, ", "))
-			}
-		}
-	}
+	fmt.Printf("Loaded %d user functions across %d %s:\n", totalFuncs, maxDepth+1, depthWord)
+	fmt.Print(ctx.FormatDepthInfo())
 }
