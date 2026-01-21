@@ -1,7 +1,19 @@
 package internal
 
+import "runtime/debug"
+
+var Version = getVersion()
+
+func getVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			return info.Main.Version
+		}
+	}
+	return "dev"
+}
+
 const (
-	Version           = "1.1.0"
 	FunctionMarker    = "//go:ahead functions"
 	CommentPattern    = `^\s*//\s*:([^:]+)(?::(.*))?`
 	ExecutionTemplate = `package main
