@@ -250,11 +250,24 @@ mime = ""   // → "application/octet-stream"
 
 GoAhead can **inject entire functions** from helper files into your source code. This is useful for obfuscation scenarios where you need both an encoding function (executed at build time) and a decoding function (included in runtime).
 
-### Basic Syntax
+### Syntax
 
+Inject markers must appear **above an interface declaration** and reference methods that exist in that interface:
+
+```go
+//:inject:MethodName1
+//:inject:MethodName2
+type MyInterface interface {
+    MethodName1(args) returnType
+    MethodName2(args) returnType
+}
 ```
-//:inject:FunctionName
-```
+
+GoAhead will:
+1. Validate that each method exists in the interface
+2. Find the implementation in helper files
+3. Inject the function code at the end of the file
+4. Remove the markers
 
 ### Example: String Obfuscation
 
@@ -294,6 +307,9 @@ import "fmt"
 var encrypted = ""
 
 //:inject:Unshadow
+type Decoder interface {
+    Unshadow(s string) string
+}
 
 func main() {
     fmt.Println(Unshadow(encrypted))
@@ -306,9 +322,17 @@ package main
 
 import "fmt"
 
-const xorKey byte = 0x42  // Dependency copied automatically
-
 var encrypted = "1'!0'6r2#115/0&"
+
+type Decoder interface {
+    Unshadow(s string) string
+}
+
+func main() {
+    fmt.Println(Unshadow(encrypted))
+}
+
+const xorKey byte = 0x42
 
 func Unshadow(s string) string {
     result := ""
@@ -317,23 +341,37 @@ func Unshadow(s string) string {
     }
     return result
 }
-
-func main() {
-    fmt.Println(Unshadow(encrypted))
-}
 ```
 
 ### What Gets Injected
 
-When you use `//:inject:FunctionName`, GoAhead:
+When you use `//:inject:FunctionName` above an interface:
 
-1. **Copies the function** from the helper file (the marker line is replaced)
-2. **Adds required imports** used by the function (single-line imports are upgraded to a block when needed)
-3. **Includes dependencies** (constants, variables, types) that the function uses
-4. **Includes helper-to-helper dependencies** (other helper functions called by the injected function)
-5. **Respects hierarchy** - uses the function from the nearest helper file
+1. **Validates** that the method exists in the interface (error if not)
+2. **Removes any existing function** with the same name (to allow updates)
+3. **Copies the function** from the helper file to the end of the source file
+4. **Adds required imports** used by the function
+5. **Includes dependencies** (constants, variables, types) that the function uses
+6. **Includes helper-to-helper dependencies** (other helper functions called by the injected function)
+7. **Respects hierarchy** - uses the function from the nearest helper file
+8. **Preserves the marker** - the `//:inject:` comment stays in the source file
 
-If the function is not found, GoAhead leaves the marker line untouched and prints a warning.
+### Subsequent Builds
+
+Unlike placeholder comments which remain static after first replacement, inject markers work differently:
+
+- **Marker stays**: The `//:inject:` comment is never removed
+- **Function is replaced**: On each build, the existing injected code block is removed and re-injected
+- **Updates propagate**: If you change the helper file, the next build will update the injected function
+- **Generated code marker**: Injected code is wrapped in standard Go generated code comments
+
+This makes it easy to iterate on implementations (e.g., changing encryption algorithms) without manual editing.
+
+### Error Conditions
+
+- **Method not in interface**: If `//:inject:Foo` is used but `Foo` is not a method in the interface, GoAhead exits with an error
+- **Markers not followed by interface**: If inject markers are not immediately followed by an interface declaration, GoAhead exits with an error
+- **Implementation not found**: If no helper file contains the function, GoAhead exits with an error
 
 ---
 

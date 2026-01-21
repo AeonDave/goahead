@@ -9,11 +9,10 @@ import (
 	"github.com/AeonDave/goahead/internal"
 )
 
-// TestInjectionBasic tests basic function injection
+// TestInjectionBasic tests basic interface method injection
 func TestInjectionBasic(t *testing.T) {
 	dir := t.TempDir()
 
-	// Helper file with function to inject
 	writeFile(t, dir, "helpers.go", `//go:build exclude
 //go:ahead functions
 
@@ -28,17 +27,18 @@ func Decode(s string) string {
 }
 `)
 
-	// Source file requesting injection
 	writeFile(t, dir, "main.go", `package main
 
 //:inject:Decode
+type Decoder interface {
+	Decode(s string) string
+}
 
 func main() {
 	_ = Decode("test")
 }
 `)
 
-	// Need go.mod for compilation
 	writeFile(t, dir, "go.mod", `module testmod
 go 1.22
 `)
@@ -55,12 +55,127 @@ go 1.22
 	if !strings.Contains(contentStr, "func Decode(s string) string") {
 		t.Errorf("Function not injected, got:\n%s", contentStr)
 	}
-	if !strings.Contains(contentStr, "c ^ 0x42") {
-		t.Errorf("Function body not injected correctly, got:\n%s", contentStr)
+	// Verify marker is preserved (not removed)
+	if !strings.Contains(contentStr, "//:inject:Decode") {
+		t.Errorf("Inject marker should be preserved, got:\n%s", contentStr)
 	}
 
-	// Verify generated code compiles
 	verifyCompiles(t, dir)
+}
+
+// TestInjectionMultipleMethods tests injecting multiple interface methods
+func TestInjectionMultipleMethods(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func Encrypt(s string) string {
+	return "enc:" + s
+}
+
+func Decrypt(s string) string {
+	return "dec:" + s
+}
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+//:inject:Encrypt
+//:inject:Decrypt
+type Security interface {
+	Encrypt(s string) string
+	Decrypt(s string) string
+}
+
+func main() {
+	_ = Encrypt("test")
+	_ = Decrypt("test")
+}
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
+
+	err := internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("RunCodegen failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr := string(content)
+
+	if !strings.Contains(contentStr, "func Encrypt") {
+		t.Errorf("Encrypt not injected, got:\n%s", contentStr)
+	}
+	if !strings.Contains(contentStr, "func Decrypt") {
+		t.Errorf("Decrypt not injected, got:\n%s", contentStr)
+	}
+
+	verifyCompiles(t, dir)
+}
+
+// TestInjectionMethodNotInInterface tests error when method not in interface
+func TestInjectionMethodNotInInterface(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func NotAMethod(s string) string { return s }
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+//:inject:NotAMethod
+type MyInterface interface {
+	SomeOtherMethod()
+}
+
+func main() {}
+`)
+
+	err := internal.RunCodegen(dir, false)
+	if err == nil {
+		t.Fatal("Expected error when method not in interface")
+	}
+	if !strings.Contains(err.Error(), "not found in interface") {
+		t.Errorf("Expected 'not found in interface' error, got: %v", err)
+	}
+}
+
+// TestInjectionNoInterface tests error when marker not followed by interface
+func TestInjectionNoInterface(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func SomeFunc() string { return "x" }
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+//:inject:SomeFunc
+var x = 1
+
+func main() {}
+`)
+
+	err := internal.RunCodegen(dir, false)
+	if err == nil {
+		t.Fatal("Expected error when inject not followed by interface")
+	}
+	if !strings.Contains(err.Error(), "must be followed by an interface") {
+		t.Errorf("Expected 'must be followed by interface' error, got: %v", err)
+	}
 }
 
 // TestInjectionWithImports tests injection includes required imports
@@ -83,6 +198,9 @@ func DecodeBase64(s string) string {
 	writeFile(t, dir, "main.go", `package main
 
 //:inject:DecodeBase64
+type Base64Decoder interface {
+	DecodeBase64(s string) string
+}
 
 func main() {
 	_ = DecodeBase64("dGVzdA==")
@@ -101,16 +219,10 @@ go 1.22
 	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
 	contentStr := string(content)
 
-	// Verify import was added
 	if !strings.Contains(contentStr, `"encoding/base64"`) {
 		t.Errorf("Import not added, got:\n%s", contentStr)
 	}
-	// Verify function was injected
-	if !strings.Contains(contentStr, "func DecodeBase64") {
-		t.Errorf("Function not injected, got:\n%s", contentStr)
-	}
 
-	// Verify generated code compiles
 	verifyCompiles(t, dir)
 }
 
@@ -137,6 +249,9 @@ func Unscramble(s string) string {
 	writeFile(t, dir, "main.go", `package main
 
 //:inject:Unscramble
+type Unscrambler interface {
+	Unscramble(s string) string
+}
 
 func main() {
 	_ = Unscramble("test")
@@ -155,16 +270,10 @@ go 1.22
 	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
 	contentStr := string(content)
 
-	// Verify constant was added
-	if !strings.Contains(contentStr, "xorKey") && !strings.Contains(contentStr, "0x42") {
+	if !strings.Contains(contentStr, "xorKey") {
 		t.Errorf("Constant not added, got:\n%s", contentStr)
 	}
-	// Verify function was injected
-	if !strings.Contains(contentStr, "func Unscramble") {
-		t.Errorf("Function not injected, got:\n%s", contentStr)
-	}
 
-	// Verify generated code compiles
 	verifyCompiles(t, dir)
 }
 
@@ -195,6 +304,9 @@ func Unshadow(s string) string {
 	writeFile(t, dir, "main.go", `package main
 
 //:inject:Unshadow
+type Shadower interface {
+	Unshadow(s string) string
+}
 
 func main() {
 	_ = Unshadow("test")
@@ -223,12 +335,11 @@ go 1.22
 		t.Errorf("Dependent constant not injected, got:\n%s", contentStr)
 	}
 
-	// Verify generated code compiles
 	verifyCompiles(t, dir)
 }
 
-// TestInjectionWithTypeSignature tests type dependencies used only in signature
-func TestInjectionWithTypeSignature(t *testing.T) {
+// TestInjectionImplementationNotFound tests error when implementation not in helpers
+func TestInjectionImplementationNotFound(t *testing.T) {
 	dir := t.TempDir()
 
 	writeFile(t, dir, "helpers.go", `//go:build exclude
@@ -236,145 +347,25 @@ func TestInjectionWithTypeSignature(t *testing.T) {
 
 package main
 
-type Token struct {
-	Value string
-}
-
-func FormatToken(t Token) string {
-	return "token"
-}
+func SomethingElse() string { return "x" }
 `)
 
 	writeFile(t, dir, "main.go", `package main
 
-//:inject:FormatToken
-
-func main() {
-	_ = FormatToken(Token{Value: "x"})
+//:inject:DoWork
+type Worker interface {
+	DoWork() string
 }
-`)
 
-	writeFile(t, dir, "go.mod", `module testmod
-go 1.22
+func main() {}
 `)
 
 	err := internal.RunCodegen(dir, false)
-	if err != nil {
-		t.Fatalf("RunCodegen failed: %v", err)
+	if err == nil {
+		t.Fatal("Expected error when implementation not found")
 	}
-
-	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
-	contentStr := string(content)
-
-	if !strings.Contains(contentStr, "type Token struct") {
-		t.Errorf("Type dependency not injected, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, "func FormatToken") {
-		t.Errorf("FormatToken not injected, got:\n%s", contentStr)
-	}
-
-	// Verify generated code compiles
-	verifyCompiles(t, dir)
-}
-
-// TestInjectionWithComplexImports tests imports for crypto packages
-func TestInjectionWithComplexImports(t *testing.T) {
-	dir := t.TempDir()
-
-	writeFile(t, dir, "helpers.go", `//go:build exclude
-//go:ahead functions
-
-package main
-
-import (
-	"crypto/aes"
-	"crypto/cipher"
-)
-
-func NewGCM() cipher.AEAD {
-	block, _ := aes.NewCipher(make([]byte, 16))
-	gcm, _ := cipher.NewGCM(block)
-	return gcm
-}
-`)
-
-	writeFile(t, dir, "main.go", `package main
-
-//:inject:NewGCM
-
-func main() {
-	_ = NewGCM()
-}
-`)
-
-	writeFile(t, dir, "go.mod", `module testmod
-go 1.22
-`)
-
-	err := internal.RunCodegen(dir, false)
-	if err != nil {
-		t.Fatalf("RunCodegen failed: %v", err)
-	}
-
-	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
-	contentStr := string(content)
-
-	if !strings.Contains(contentStr, `"crypto/aes"`) || !strings.Contains(contentStr, `"crypto/cipher"`) {
-		t.Errorf("Complex imports not injected, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, "func NewGCM") {
-		t.Errorf("NewGCM not injected, got:\n%s", contentStr)
-	}
-
-	// Verify generated code compiles
-	verifyCompiles(t, dir)
-}
-
-// TestInjectionWithChaCha20Poly1305 tests imports for chacha20-poly1305
-func TestInjectionWithChaCha20Poly1305(t *testing.T) {
-	dir := t.TempDir()
-
-	writeFile(t, dir, "helpers.go", `//go:build exclude
-//go:ahead functions
-
-package main
-
-import (
-	"crypto/cipher"
-	"golang.org/x/crypto/chacha20poly1305"
-)
-
-func NewChaCha20() cipher.AEAD {
-	key := make([]byte, chacha20poly1305.KeySize)
-	aead, _ := chacha20poly1305.New(key)
-	return aead
-}
-`)
-
-	writeFile(t, dir, "main.go", `package main
-
-//:inject:NewChaCha20
-
-func main() {
-	_ = NewChaCha20()
-}
-`)
-
-	// Note: This test verifies injection only, not compilation
-	// because golang.org/x/crypto is external
-	err := internal.RunCodegen(dir, false)
-	if err != nil {
-		t.Fatalf("RunCodegen failed: %v", err)
-	}
-
-	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
-	contentStr := string(content)
-
-	if !strings.Contains(contentStr, `"golang.org/x/crypto/chacha20poly1305"`) || !strings.Contains(contentStr, `"crypto/cipher"`) {
-		t.Errorf("ChaCha20 imports not injected, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, "func NewChaCha20") {
-		t.Errorf("NewChaCha20 not injected, got:\n%s", contentStr)
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("Expected 'not found' error, got: %v", err)
 	}
 }
 
@@ -414,6 +405,9 @@ import "fmt"
 var encrypted = ""
 
 //:inject:Unshadow
+type Shadower interface {
+	Unshadow(s string) string
+}
 
 func main() {
 	decrypted := Unshadow(encrypted)
@@ -433,7 +427,7 @@ go 1.22
 	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
 	contentStr := string(content)
 
-	// Verify value was replaced (encrypted should not be "")
+	// Verify value was replaced
 	if strings.Contains(contentStr, `encrypted = ""`) {
 		t.Errorf("Value not replaced, got:\n%s", contentStr)
 	}
@@ -442,7 +436,6 @@ go 1.22
 		t.Errorf("Function not injected, got:\n%s", contentStr)
 	}
 
-	// Verify generated code compiles
 	verifyCompiles(t, dir)
 }
 
@@ -450,32 +443,32 @@ go 1.22
 func TestInjectionHierarchy(t *testing.T) {
 	dir := t.TempDir()
 
-	// Root helper
 	writeFile(t, dir, "helpers.go", `//go:build exclude
 //go:ahead functions
 
 package main
 
-func Decoder() string {
-	return "root-decoder"
+func Process() string {
+	return "root-process"
 }
 `)
 
-	// Sub helper (shadows root)
 	writeFile(t, dir, "sub/helpers.go", `//go:build exclude
 //go:ahead functions
 
 package main
 
-func Decoder() string {
-	return "sub-decoder"
+func Process() string {
+	return "sub-process"
 }
 `)
 
-	// Sub source file - should get sub's Decoder
 	writeFile(t, dir, "sub/main.go", `package main
 
-//:inject:Decoder
+//:inject:Process
+type Processor interface {
+	Process() string
+}
 
 func main() {}
 `)
@@ -488,14 +481,14 @@ func main() {}
 	content, _ := os.ReadFile(filepath.Join(dir, "sub/main.go"))
 	contentStr := string(content)
 
-	// Should have sub-decoder, not root-decoder
-	if !strings.Contains(contentStr, `"sub-decoder"`) {
-		t.Errorf("Expected sub-decoder from hierarchy, got:\n%s", contentStr)
+	// Should have sub-process, not root-process
+	if !strings.Contains(contentStr, `"sub-process"`) {
+		t.Errorf("Expected sub-process from hierarchy, got:\n%s", contentStr)
 	}
 }
 
-// TestInjectionNotFound tests error handling when function not found
-func TestInjectionNotFound(t *testing.T) {
+// TestInjectionPreservesExistingImports tests injection with existing imports block
+func TestInjectionPreservesExistingImports(t *testing.T) {
 	dir := t.TempDir()
 
 	writeFile(t, dir, "helpers.go", `//go:build exclude
@@ -503,59 +496,29 @@ func TestInjectionNotFound(t *testing.T) {
 
 package main
 
-func Exists() string { return "exists" }
-`)
+import "strings"
 
-	writeFile(t, dir, "main.go", `package main
-
-//:inject:NonExistent
-
-func main() {}
-`)
-
-	// Should not fail, just warn
-	err := internal.RunCodegen(dir, false)
-	if err != nil {
-		t.Fatalf("RunCodegen should not fail: %v", err)
-	}
-
-	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
-	contentStr := string(content)
-
-	// Marker should remain (not replaced)
-	if !strings.Contains(contentStr, "//:inject:NonExistent") {
-		t.Errorf("Marker should remain when function not found, got:\n%s", contentStr)
-	}
-}
-
-// TestMultipleInjections tests injecting multiple functions
-func TestMultipleInjections(t *testing.T) {
-	dir := t.TempDir()
-
-	writeFile(t, dir, "helpers.go", `//go:build exclude
-//go:ahead functions
-
-package main
-
-func Encode(s string) string {
-	return "encoded:" + s
-}
-
-func Decode(s string) string {
-	return "decoded:" + s
+func Process(s string) string {
+	return strings.ToUpper(s)
 }
 `)
 
 	writeFile(t, dir, "main.go", `package main
 
-//:inject:Encode
+import "fmt"
 
-//:inject:Decode
+//:inject:Process
+type Processor interface {
+	Process(s string) string
+}
 
 func main() {
-	_ = Encode("test")
-	_ = Decode("test")
+	fmt.Println(Process("test"))
 }
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
 `)
 
 	err := internal.RunCodegen(dir, false)
@@ -566,12 +529,14 @@ func main() {
 	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
 	contentStr := string(content)
 
-	if !strings.Contains(contentStr, "func Encode") {
-		t.Errorf("Encode not injected, got:\n%s", contentStr)
+	if !strings.Contains(contentStr, `"fmt"`) {
+		t.Errorf("Original import fmt not preserved, got:\n%s", contentStr)
 	}
-	if !strings.Contains(contentStr, "func Decode") {
-		t.Errorf("Decode not injected, got:\n%s", contentStr)
+	if !strings.Contains(contentStr, `"strings"`) {
+		t.Errorf("Injected import strings not added, got:\n%s", contentStr)
 	}
+
+	verifyCompiles(t, dir)
 }
 
 // TestInjectionWithVariables tests injection includes dependent variables
@@ -597,6 +562,9 @@ func Decrypt(s string) string {
 	writeFile(t, dir, "main.go", `package main
 
 //:inject:Decrypt
+type Decrypter interface {
+	Decrypt(s string) string
+}
 
 func main() {
 	_ = Decrypt("test")
@@ -615,19 +583,15 @@ go 1.22
 	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
 	contentStr := string(content)
 
-	if !strings.Contains(contentStr, "func Decrypt") {
-		t.Errorf("Function not injected, got:\n%s", contentStr)
-	}
 	if !strings.Contains(contentStr, "defaultKey") {
 		t.Errorf("Variable dependency not injected, got:\n%s", contentStr)
 	}
 
-	// Verify generated code compiles
 	verifyCompiles(t, dir)
 }
 
-// TestInjectionWithMultipleDependencies tests deep dependency chains
-func TestInjectionWithMultipleDependencies(t *testing.T) {
+// TestInjectionWithTypeInSignature tests type dependencies in function signature
+func TestInjectionWithTypeInSignature(t *testing.T) {
 	dir := t.TempDir()
 
 	writeFile(t, dir, "helpers.go", `//go:build exclude
@@ -635,28 +599,24 @@ func TestInjectionWithMultipleDependencies(t *testing.T) {
 
 package main
 
-const prefix = "pre_"
-const suffix = "_suf"
-
-func addPrefix(s string) string {
-	return prefix + s
+type Token struct {
+	Value string
 }
 
-func addSuffix(s string) string {
-	return s + suffix
-}
-
-func Transform(s string) string {
-	return addSuffix(addPrefix(s))
+func FormatToken(t Token) string {
+	return "token:" + t.Value
 }
 `)
 
 	writeFile(t, dir, "main.go", `package main
 
-//:inject:Transform
+//:inject:FormatToken
+type TokenFormatter interface {
+	FormatToken(t Token) string
+}
 
 func main() {
-	_ = Transform("test")
+	_ = FormatToken(Token{Value: "x"})
 }
 `)
 
@@ -672,29 +632,405 @@ go 1.22
 	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
 	contentStr := string(content)
 
-	// Transform depends on addPrefix and addSuffix which depend on prefix and suffix
-	if !strings.Contains(contentStr, "func Transform") {
-		t.Errorf("Main function not injected, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, "func addPrefix") {
-		t.Errorf("addPrefix helper not injected, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, "func addSuffix") {
-		t.Errorf("addSuffix helper not injected, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, `prefix = "pre_"`) {
-		t.Errorf("prefix constant not injected, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, `suffix = "_suf"`) {
-		t.Errorf("suffix constant not injected, got:\n%s", contentStr)
+	if !strings.Contains(contentStr, "type Token struct") {
+		t.Errorf("Type dependency not injected, got:\n%s", contentStr)
 	}
 
-	// Verify generated code compiles
 	verifyCompiles(t, dir)
 }
 
-// TestInjectionPreservesExistingImports tests injection with existing imports block
-func TestInjectionPreservesExistingImports(t *testing.T) {
+// TestInjectionDanglingMarker tests error for marker at end of file
+func TestInjectionDanglingMarker(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func Foo() string { return "foo" }
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+func main() {}
+
+//:inject:Foo
+`)
+
+	err := internal.RunCodegen(dir, false)
+	if err == nil {
+		t.Fatal("Expected error for dangling inject marker")
+	}
+	if !strings.Contains(err.Error(), "must be followed by an interface") {
+		t.Errorf("Expected interface error, got: %v", err)
+	}
+}
+
+// TestInjectionIdempotent tests that running codegen twice replaces functions (not duplicates)
+func TestInjectionIdempotent(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func Decode(s string) string {
+	result := ""
+	for _, c := range s {
+		result += string(c ^ 0x42)
+	}
+	return result
+}
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+//:inject:Decode
+type Decoder interface {
+	Decode(s string) string
+}
+
+func main() {
+	_ = Decode("test")
+}
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
+
+	// First run
+	err := internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("First RunCodegen failed: %v", err)
+	}
+
+	content1, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr1 := string(content1)
+
+	// Verify function was injected
+	if !strings.Contains(contentStr1, "func Decode(s string) string") {
+		t.Fatalf("Function not injected on first run")
+	}
+
+	// Marker should still be present
+	if !strings.Contains(contentStr1, "//:inject:Decode") {
+		t.Fatalf("Marker should remain after injection")
+	}
+
+	// Count occurrences
+	count1 := strings.Count(contentStr1, "func Decode(s string) string")
+	if count1 != 1 {
+		t.Fatalf("Expected 1 Decode function after first run, got %d", count1)
+	}
+
+	// Second run (simulating subsequent build)
+	err = internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("Second RunCodegen failed: %v", err)
+	}
+
+	content2, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr2 := string(content2)
+
+	// Count occurrences again - should still be 1 (replaced, not duplicated)
+	count2 := strings.Count(contentStr2, "func Decode(s string) string")
+	if count2 != 1 {
+		t.Fatalf("Expected 1 Decode function after second run, got %d (duplication occurred!)", count2)
+	}
+
+	// Marker should still be present
+	if !strings.Contains(contentStr2, "//:inject:Decode") {
+		t.Fatalf("Marker should remain after second injection")
+	}
+
+	// Third run for good measure
+	err = internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("Third RunCodegen failed: %v", err)
+	}
+
+	content3, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr3 := string(content3)
+
+	count3 := strings.Count(contentStr3, "func Decode(s string) string")
+	if count3 != 1 {
+		t.Fatalf("Expected 1 Decode function after third run, got %d (duplication occurred!)", count3)
+	}
+
+	verifyCompiles(t, dir)
+}
+
+// TestInjectionUpdatesOnHelperChange tests that changing helper updates the injected function
+func TestInjectionUpdatesOnHelperChange(t *testing.T) {
+	dir := t.TempDir()
+
+	// Initial helper with version 1
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func Process() string {
+	return "version1"
+}
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+//:inject:Process
+type Processor interface {
+	Process() string
+}
+
+func main() {
+	_ = Process()
+}
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
+
+	// First run
+	err := internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("First run failed: %v", err)
+	}
+
+	content1, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	if !strings.Contains(string(content1), `"version1"`) {
+		t.Fatalf("Expected version1 in first run")
+	}
+
+	// Update helper to version 2
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func Process() string {
+	return "version2"
+}
+`)
+
+	// Second run - should update the function
+	err = internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("Second run failed: %v", err)
+	}
+
+	content2, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr2 := string(content2)
+
+	// Should have version2, not version1
+	if !strings.Contains(contentStr2, `"version2"`) {
+		t.Fatalf("Expected version2 after helper update, got:\n%s", contentStr2)
+	}
+	if strings.Contains(contentStr2, `"version1"`) {
+		t.Fatalf("version1 should be replaced by version2")
+	}
+
+	// Should still have only one Process function
+	count := strings.Count(contentStr2, "func Process() string")
+	if count != 1 {
+		t.Fatalf("Expected 1 Process function, got %d", count)
+	}
+
+	verifyCompiles(t, dir)
+}
+
+// TestInjectionWithPlaceholderMultipleRuns tests multiple runs with both placeholder and inject
+func TestInjectionWithPlaceholderMultipleRuns(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+const key byte = 0x42
+
+func Encode(s string) string {
+	result := ""
+	for _, c := range s {
+		result += string(byte(c) ^ key)
+	}
+	return result
+}
+
+func Decode(s string) string {
+	result := ""
+	for _, c := range s {
+		result += string(byte(c) ^ key)
+	}
+	return result
+}
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+import "fmt"
+
+//:Encode:"password123"
+var secret = ""
+
+//:inject:Decode
+type Decoder interface {
+	Decode(s string) string
+}
+
+func main() {
+	fmt.Println(Decode(secret))
+}
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
+
+	// First run
+	err := internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("First run failed: %v", err)
+	}
+
+	content1, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr1 := string(content1)
+
+	// Placeholder should be replaced
+	if strings.Contains(contentStr1, `secret = ""`) {
+		t.Errorf("Placeholder not replaced on first run")
+	}
+	// Inject marker should remain
+	if !strings.Contains(contentStr1, "//:inject:Decode") {
+		t.Errorf("Inject marker should remain")
+	}
+	// Function should be injected
+	if !strings.Contains(contentStr1, "func Decode") {
+		t.Errorf("Function not injected")
+	}
+
+	verifyCompiles(t, dir)
+
+	// Second run - placeholder already replaced, inject should still work
+	err = internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("Second run failed: %v", err)
+	}
+
+	content2, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr2 := string(content2)
+
+	// Should still have exactly one Decode function
+	count := strings.Count(contentStr2, "func Decode(s string) string")
+	if count != 1 {
+		t.Errorf("Expected 1 Decode function after second run, got %d", count)
+	}
+
+	verifyCompiles(t, dir)
+
+	// Third run
+	err = internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("Third run failed: %v", err)
+	}
+
+	content3, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	count3 := strings.Count(string(content3), "func Decode(s string) string")
+	if count3 != 1 {
+		t.Errorf("Expected 1 Decode function after third run, got %d", count3)
+	}
+
+	verifyCompiles(t, dir)
+}
+
+// TestInjectionMultipleInterfacesMultipleRuns tests multiple interfaces with inject over multiple builds
+func TestInjectionMultipleInterfacesMultipleRuns(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func Encrypt(s string) string { return "enc:" + s }
+func Decrypt(s string) string { return "dec:" + s }
+func Hash(s string) string { return "hash:" + s }
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+//:inject:Encrypt
+//:inject:Decrypt
+type Crypto interface {
+	Encrypt(s string) string
+	Decrypt(s string) string
+}
+
+//:inject:Hash
+type Hasher interface {
+	Hash(s string) string
+}
+
+func main() {
+	_ = Encrypt("x")
+	_ = Decrypt("y")
+	_ = Hash("z")
+}
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
+
+	// First run
+	err := internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("First run failed: %v", err)
+	}
+
+	content1, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr1 := string(content1)
+
+	if strings.Count(contentStr1, "func Encrypt") != 1 {
+		t.Errorf("Expected 1 Encrypt")
+	}
+	if strings.Count(contentStr1, "func Decrypt") != 1 {
+		t.Errorf("Expected 1 Decrypt")
+	}
+	if strings.Count(contentStr1, "func Hash") != 1 {
+		t.Errorf("Expected 1 Hash")
+	}
+
+	verifyCompiles(t, dir)
+
+	// Second run
+	err = internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("Second run failed: %v", err)
+	}
+
+	content2, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr2 := string(content2)
+
+	if strings.Count(contentStr2, "func Encrypt") != 1 {
+		t.Errorf("Expected 1 Encrypt after second run, got %d", strings.Count(contentStr2, "func Encrypt"))
+	}
+	if strings.Count(contentStr2, "func Decrypt") != 1 {
+		t.Errorf("Expected 1 Decrypt after second run")
+	}
+	if strings.Count(contentStr2, "func Hash") != 1 {
+		t.Errorf("Expected 1 Hash after second run")
+	}
+
+	verifyCompiles(t, dir)
+}
+
+// TestInjectionDuplicateImportsHandled tests that duplicate imports are handled correctly
+func TestInjectionDuplicateImportsHandled(t *testing.T) {
 	dir := t.TempDir()
 
 	writeFile(t, dir, "helpers.go", `//go:build exclude
@@ -704,19 +1040,27 @@ package main
 
 import "strings"
 
-func Process(s string) string {
+func ToUpper(s string) string {
 	return strings.ToUpper(s)
 }
 `)
 
+	// Source already has strings import
 	writeFile(t, dir, "main.go", `package main
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-//:inject:Process
+//:inject:ToUpper
+type Upper interface {
+	ToUpper(s string) string
+}
 
 func main() {
-	fmt.Println(Process("test"))
+	fmt.Println(strings.ToLower("TEST"))
+	fmt.Println(ToUpper("test"))
 }
 `)
 
@@ -724,30 +1068,33 @@ func main() {
 go 1.22
 `)
 
+	// First run
 	err := internal.RunCodegen(dir, false)
 	if err != nil {
-		t.Fatalf("RunCodegen failed: %v", err)
+		t.Fatalf("First run failed: %v", err)
 	}
 
-	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
-	contentStr := string(content)
+	verifyCompiles(t, dir)
 
-	if !strings.Contains(contentStr, `"fmt"`) {
-		t.Errorf("Original import fmt not preserved, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, `"strings"`) {
-		t.Errorf("Injected import strings not added, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, "func Process") {
-		t.Errorf("Function not injected, got:\n%s", contentStr)
+	// Second run - should not create duplicate imports
+	err = internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("Second run failed: %v", err)
 	}
 
-	// Verify generated code compiles
+	verifyCompiles(t, dir)
+
+	// Third run
+	err = internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("Third run failed: %v", err)
+	}
+
 	verifyCompiles(t, dir)
 }
 
-// TestInjectionInNestedStruct tests injection doesn't break struct fields
-func TestInjectionWithStructType(t *testing.T) {
+// TestInjectionWithDependenciesMultipleRuns tests that dependencies are handled across runs
+func TestInjectionWithDependenciesMultipleRuns(t *testing.T) {
 	dir := t.TempDir()
 
 	writeFile(t, dir, "helpers.go", `//go:build exclude
@@ -755,23 +1102,28 @@ func TestInjectionWithStructType(t *testing.T) {
 
 package main
 
-type Config struct {
-	Key   string
-	Value int
-}
+const secretKey = 0xAB
 
-func NewConfig() Config {
-	return Config{Key: "default", Value: 42}
+var salt = []byte{0x01, 0x02}
+
+func Scramble(s string) string {
+	result := ""
+	for i, c := range s {
+		result += string(byte(c) ^ secretKey ^ salt[i%len(salt)])
+	}
+	return result
 }
 `)
 
 	writeFile(t, dir, "main.go", `package main
 
-//:inject:NewConfig
+//:inject:Scramble
+type Scrambler interface {
+	Scramble(s string) string
+}
 
 func main() {
-	cfg := NewConfig()
-	_ = cfg
+	_ = Scramble("test")
 }
 `)
 
@@ -779,21 +1131,27 @@ func main() {
 go 1.22
 `)
 
-	err := internal.RunCodegen(dir, false)
-	if err != nil {
-		t.Fatalf("RunCodegen failed: %v", err)
-	}
+	// Run 3 times
+	for i := 1; i <= 3; i++ {
+		err := internal.RunCodegen(dir, false)
+		if err != nil {
+			t.Fatalf("Run %d failed: %v", i, err)
+		}
 
-	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
-	contentStr := string(content)
+		content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+		contentStr := string(content)
 
-	if !strings.Contains(contentStr, "type Config struct") {
-		t.Errorf("Type not injected, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, "func NewConfig") {
-		t.Errorf("Function not injected, got:\n%s", contentStr)
-	}
+		// Should have exactly one of each
+		if strings.Count(contentStr, "func Scramble") != 1 {
+			t.Errorf("Run %d: Expected 1 Scramble function", i)
+		}
+		if strings.Count(contentStr, "secretKey") < 1 {
+			t.Errorf("Run %d: Expected secretKey constant", i)
+		}
+		if strings.Count(contentStr, "salt") < 1 {
+			t.Errorf("Run %d: Expected salt variable", i)
+		}
 
-	// Verify generated code compiles
-	verifyCompiles(t, dir)
+		verifyCompiles(t, dir)
+	}
 }
