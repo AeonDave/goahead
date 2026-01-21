@@ -44,11 +44,24 @@ func main() {
 }
 
 func isToolexecMode() bool {
-	return len(os.Args) >= 2 &&
-		!strings.HasPrefix(os.Args[1], "-") &&
-		(strings.Contains(os.Args[1], "compile") ||
-			strings.Contains(os.Args[1], "link") ||
-			strings.Contains(os.Args[1], "asm"))
+	if len(os.Args) < 2 {
+		return false
+	}
+	// If first arg starts with "-", it's a flag, not toolexec mode
+	if strings.HasPrefix(os.Args[1], "-") {
+		return false
+	}
+	// In toolexec mode, Go passes the tool path as first argument
+	// The tool is typically in GOROOT/pkg/tool/GOOS_GOARCH/
+	// Accept any executable that looks like a Go tool
+	arg := os.Args[1]
+	return strings.Contains(arg, "go"+string(os.PathSeparator)+"pkg"+string(os.PathSeparator)+"tool") ||
+		strings.HasSuffix(arg, "compile") || strings.HasSuffix(arg, "compile.exe") ||
+		strings.HasSuffix(arg, "link") || strings.HasSuffix(arg, "link.exe") ||
+		strings.HasSuffix(arg, "asm") || strings.HasSuffix(arg, "asm.exe") ||
+		strings.HasSuffix(arg, "cgo") || strings.HasSuffix(arg, "cgo.exe") ||
+		strings.HasSuffix(arg, "pack") || strings.HasSuffix(arg, "pack.exe") ||
+		strings.HasSuffix(arg, "buildid") || strings.HasSuffix(arg, "buildid.exe")
 }
 
 func parseFlags() *internal.Config {
