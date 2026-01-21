@@ -281,17 +281,6 @@ func (inj *Injector) ExtractFunction(funcName, sourceDir string) (*InjectionResu
 
 	result := &InjectionResult{}
 
-	// Extract imports
-	for _, imp := range node.Imports {
-		var importSpec string
-		if imp.Name != nil {
-			importSpec = imp.Name.Name + " " + imp.Path.Value
-		} else {
-			importSpec = imp.Path.Value
-		}
-		result.Imports = append(result.Imports, importSpec)
-	}
-
 	// Build map of helper functions
 	funcDecls := make(map[string]*ast.FuncDecl)
 	for _, decl := range node.Decls {
@@ -339,6 +328,31 @@ func (inj *Injector) ExtractFunction(funcName, sourceDir string) (*InjectionResu
 	for _, fn := range included {
 		for ident := range inj.collectUsedIdentifiers(fn) {
 			usedIdents[ident] = true
+		}
+	}
+
+	// Extract only the imports that are actually used
+	for _, imp := range node.Imports {
+		// Get the package name (either alias or last part of path)
+		var pkgName string
+		if imp.Name != nil {
+			pkgName = imp.Name.Name
+		} else {
+			// Extract package name from path (e.g., "encoding/hex" -> "hex")
+			path := strings.Trim(imp.Path.Value, `"`)
+			parts := strings.Split(path, "/")
+			pkgName = parts[len(parts)-1]
+		}
+
+		// Check if this package is used
+		if usedIdents[pkgName] {
+			var importSpec string
+			if imp.Name != nil {
+				importSpec = imp.Name.Name + " " + imp.Path.Value
+			} else {
+				importSpec = imp.Path.Value
+			}
+			result.Imports = append(result.Imports, importSpec)
 		}
 	}
 

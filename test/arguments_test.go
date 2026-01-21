@@ -259,4 +259,62 @@ func main() {}
 			t.Fatalf("boolean processing failed\n%s", got)
 		}
 	})
+
+	t.Run("SpaceAfterSlashes", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func addOne(n int) int { return n + 1 }
+`)
+		// Note: "// :" with space - common after gofmt
+		writeFile(t, dir, "main.go", `package main
+
+var (
+    // :addOne:10
+    val = 0
+)
+
+func main() {}
+`)
+		err := internal.RunCodegen(dir, false)
+		if err != nil {
+			t.Fatalf("RunCodegen failed: %v", err)
+		}
+		content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+		if !strings.Contains(string(content), "val = 11") {
+			t.Fatalf("space after // not handled\n%s", string(content))
+		}
+	})
+
+	t.Run("MultipleSpacesAfterSlashes", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func double(n int) int { return n * 2 }
+`)
+		// Multiple spaces after //
+		writeFile(t, dir, "main.go", `package main
+
+var (
+    //  :double:5
+    val = 0
+)
+
+func main() {}
+`)
+		err := internal.RunCodegen(dir, false)
+		if err != nil {
+			t.Fatalf("RunCodegen failed: %v", err)
+		}
+		content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+		if !strings.Contains(string(content), "val = 10") {
+			t.Fatalf("multiple spaces after // not handled\n%s", string(content))
+		}
+	})
 }

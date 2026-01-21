@@ -71,6 +71,8 @@ go build -toolexec="goahead" ./...
 
 The placeholder comment must appear on the line **immediately before** the target statement or expression.
 
+> **Formatter compatibility**: GoAhead accepts optional spaces after `//`, so both `//:func:arg` and `// :func:arg` work identically. This prevents issues when code formatters add a space after `//`.
+
 ### Argument Types
 
 | Type | Syntax | Examples |
@@ -350,7 +352,7 @@ When you use `//:inject:FunctionName` above an interface:
 1. **Validates** that the method exists in the interface (error if not)
 2. **Removes any existing function** with the same name (to allow updates)
 3. **Copies the function** from the helper file to the end of the source file
-4. **Adds required imports** used by the function
+4. **Adds required imports** - only imports actually used by the injected function (unused imports in helper files are filtered out)
 5. **Includes dependencies** (constants, variables, types) that the function uses
 6. **Includes helper-to-helper dependencies** (other helper functions called by the injected function)
 7. **Respects hierarchy** - uses the function from the nearest helper file

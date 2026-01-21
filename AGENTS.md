@@ -21,8 +21,11 @@ GoAhead is a **compile-time code generation tool** for Go that:
 //go:ahead functions                          ← Marks a file as a helper/function file
 
 //:functionName:arg1:arg2:...                 ← Placeholder (goes immediately ABOVE the target statement)
+// :functionName:arg1:...                     ← Also valid (space after // for formatter compatibility)
 someStatement = literalValue                  ← GoAhead replaces the first matching literal in this statement
 ```
+
+> **Note**: Spaces after `//` are tolerated. Both `//:func` and `// :func` work. This prevents bugs when formatters add spaces.
 
 ### Argument Types
 | Type | Syntax | Examples |
@@ -157,7 +160,7 @@ type MyInterface interface {
 
 ### What Gets Injected
 - The function implementation itself
-- Required imports
+- Required imports (only those actually used - unused imports in helper files are filtered out)
 - Required constants
 - Required variables
 - Required types

@@ -63,6 +63,52 @@ go 1.22
 	verifyCompiles(t, dir)
 }
 
+// TestInjectionWithSpaceAfterSlashes tests "// :inject:" format (space after //)
+func TestInjectionWithSpaceAfterSlashes(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func Transform(s string) string {
+	return "transformed:" + s
+}
+`)
+
+	// Note: "// :inject:" with space - common after gofmt
+	writeFile(t, dir, "main.go", `package main
+
+// :inject:Transform
+type Transformer interface {
+	Transform(s string) string
+}
+
+func main() {
+	_ = Transform("test")
+}
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
+
+	err := internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("RunCodegen failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr := string(content)
+
+	if !strings.Contains(contentStr, "func Transform(s string) string") {
+		t.Errorf("Function not injected with space format, got:\n%s", contentStr)
+	}
+
+	verifyCompiles(t, dir)
+}
+
 // TestInjectionMultipleMethods tests injecting multiple interface methods
 func TestInjectionMultipleMethods(t *testing.T) {
 	dir := t.TempDir()
@@ -176,6 +222,70 @@ func main() {}
 	if !strings.Contains(err.Error(), "must be followed by an interface") {
 		t.Errorf("Expected 'must be followed by interface' error, got: %v", err)
 	}
+}
+
+// TestInjectionUnusedImportsNotAdded tests that unused imports are NOT injected
+func TestInjectionUnusedImportsNotAdded(t *testing.T) {
+	dir := t.TempDir()
+
+	// Helper file with multiple imports, but function only uses one
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+import (
+	"encoding/hex"
+	"io"
+	"net/http"
+)
+
+// HexEncode only uses hex package
+func HexEncode(s string) string {
+	return hex.EncodeToString([]byte(s))
+}
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+//:inject:HexEncode
+type Encoder interface {
+	HexEncode(s string) string
+}
+
+func main() {
+	_ = HexEncode("test")
+}
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
+
+	err := internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("RunCodegen failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr := string(content)
+
+	// hex should be added (it's used)
+	if !strings.Contains(contentStr, `"encoding/hex"`) {
+		t.Errorf("Used import 'hex' should be added, got:\n%s", contentStr)
+	}
+
+	// io should NOT be in the import block (unused)
+	if strings.Contains(contentStr, `"io"`) {
+		t.Errorf("Unused import 'io' should NOT be added, got:\n%s", contentStr)
+	}
+
+	// net/http should NOT be in the import block (unused)
+	if strings.Contains(contentStr, `"net/http"`) {
+		t.Errorf("Unused import 'net/http' should NOT be added, got:\n%s", contentStr)
+	}
+
+	verifyCompiles(t, dir)
 }
 
 // TestInjectionWithImports tests injection includes required imports

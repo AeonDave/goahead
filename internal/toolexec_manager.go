@@ -40,7 +40,7 @@ func (tm *ToolexecManager) RunAsToolexec() {
 		}
 
 		if !versionShown {
-			_, _ = fmt.Fprintf(os.Stderr, "[goahead] GoAhead Code Generator v%s\n", Version)
+			_, _ = fmt.Fprintf(os.Stderr, "[goahead] GoAhead Code Generator %s\n", Version)
 			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Processing user code with intelligent code generation\n")
 			versionShown = true
 		}
