@@ -1,56 +1,152 @@
 # GoAhead Agents Guide
 
+## What GoAhead Does
+
+GoAhead is a compile-time code generation tool for Go. It replaces placeholder comments with computed values at build time.
+
+**Toolexec mode** (recommended):
+```bash
+go build -toolexec="goahead" ./...
+```
+
+**Standalone mode**:
+```bash
+goahead -dir=./mypackage
+```
+
+## Placeholder Grammar
+
+### File Marker (required in files using placeholders)
+```
+//go:ahead [helpers.go] [stdlib:strings,fmt]
+```
+- `[helpers.go]`: Optional helper file containing functions to execute
+- `[stdlib:pkg1,pkg2]`: Optional stdlib packages to use directly
+
+### Placeholder Syntax
+```
+//:functionName:arg1:arg2:...
+nextLineValue
+```
+
+The placeholder comment MUST be immediately followed by a literal value on the next line. GoAhead replaces that literal with the function's return value.
+
+### Argument Types
+| Type | Example | Notes |
+|------|---------|-------|
+| String | `"hello"` or `` `raw` `` | Quoted or backtick |
+| Int | `42`, `-5`, `0x1F`, `0b101` | Decimal, hex, binary, octal |
+| Float | `3.14`, `-2.5`, `1e-10` | Scientific notation supported |
+| Bool | `true`, `false` | |
+
+### Examples
+
+**Helper file** (`helpers.go`):
+```go
+//go:build ignore
+
+package main
+
+func version() string { return "1.0.0" }
+func add(a, b int) int { return a + b }
+func greet(name string) string { return "Hello, " + name }
+```
+
+**Source file** (`main.go`):
+```go
+//go:ahead helpers.go
+
+package main
+
+const Version = //:version:
+"placeholder"
+
+const Sum = //:add:10:20
+0
+
+const Greeting = //:greet:"World"
+""
+```
+
+**After processing**:
+```go
+const Version = "1.0.0"
+const Sum = 30
+const Greeting = "Hello, World"
+```
+
+### Stdlib Integration
+```go
+//go:ahead stdlib:strings,strconv
+
+const Upper = //:strings.ToUpper:"hello"
+""
+
+const Num = //:strconv.Itoa:42
+""
+```
+
 ## Repository Overview
 
-- `go.mod`: Declares the `github.com/AeonDave/goahead` module targeting Go 1.22+.
-- `main.go`: Command-line entry point that orchestrates toolexec or standalone execution.
-- `internal/`: Core library for code generation, toolexec integration, and helper execution.
-- `examples/`: Minimal projects demonstrating how to invoke GoAhead during builds.
-- `test/`: Integration and unit tests covering filters, helper execution, and code generation outputs.
-- `Makefile`: Convenience targets mirroring common Go toolchain commands.
-- `README.md`: Usage overview, installation instructions, and quick-start guide.
+- `go.mod`: Module `github.com/AeonDave/goahead`, Go 1.22+
+- `main.go`: CLI entry point for toolexec and standalone modes
+- `internal/`: Core logic (codegen, toolexec, function execution)
+- `examples/`: Feature examples:
+  - `base/`: Simple helper functions
+  - `config/`: Configuration injection
+  - `report/`: Multiple helpers
+  - `stdlib_e/`: Stdlib integration
+  - `variadic/`: Variadic functions (`joinAll`, `sum`, `maxOf`)
+  - `constants/`: Constants and types in helpers
+  - `expressions/`: Maps, structs, slices
+  - `types/`: Custom type definitions
+  - `directives/`: Go directives (`//go:embed`, `//go:noinline`)
+- `test/`: Tests by category:
+  - `test_helpers.go`: Shared utilities
+  - `grammar_test.go`: Placeholder syntax
+  - `arguments_test.go`: Argument parsing
+  - `expressions_test.go`: Complex expressions
+  - `imports_test.go`: Import aliases
+  - `helpers_file_test.go`: Helper features
+  - `strings_test.go`: Unicode, JSON, special strings
+  - `cgo_test.go`: CGO compatibility
+  - `directives_test.go`: Go directive preservation
+  - `platform_test.go`: Cross-platform paths
 
 ## Coding Standards
 
-- Write Go code and stick to the standard library unless an exception is documented.
-- Run `gofmt` on any touched Go source; keep imports grouped and sorted.
-- Prefer explicit error handling over panics in library code and return contextual errors (`fmt.Errorf` with `%w`).
-- Maintain deterministic behaviour: helper execution and code rewriting should be reproducible for identical inputs.
-- Keep functions focused; extract reusable utilities into the `internal` package when they span multiple entry points.
+- Standard library only unless documented otherwise
+- Run `gofmt`; group and sort imports
+- Return errors with `fmt.Errorf` and `%w`; no panics
+- Deterministic: identical inputs → identical outputs
+- Reusable code goes in `internal/`
 
 ## Implementation Notes
 
-- `internal/` packages should remain side-effect free at import time and expose explicit constructors (e.g., `NewToolexecManager`).
-- Preserve marker comment conventions (`//go:ahead ...`, `//:helperName:arg`) when transforming source files.
-- When extending CLI flags, wire them through `internal.Config` so both standalone and toolexec modes remain aligned.
-- Extend `test/` with unit or integration coverage alongside any behaviour changes; create descriptive subdirectories for fixtures when needed.
+- `internal/` packages: side-effect free at import, use constructors
+- Marker syntax: `//go:ahead ...` (file), `//:func:args` (placeholder)
+- CLI flags wired through `internal.Config`
+- Tests required for behaviour changes
 
 ## Testing
 
-Run Go test commands from the repository root:
-
 ```bash
 go test ./...           # Full suite
-go test ./internal/...  # Package-level checks for core logic
-go test ./test/...      # Integration-focused tests
+go test ./internal/...  # Core logic
+go test ./test/...      # Integration tests
+go test -race ./...     # Race detection
 ```
-
-Use `go test -race ./...` when modifying concurrent code or file processing pipelines.
 
 ## Pre-Submission Checks
 
-Before opening a pull request, execute:
-
 ```bash
-go vet ./...    # Static analysis
-go build ./...  # Ensure binaries compile
+go vet ./...
+go build ./...
 ```
-
-Include any additional project-specific scripts (e.g., `make test`, `make lint`) if they become relevant to your change.
 
 ## Pull Request Expectations
 
-- Summarise behavioural changes, highlighting impacts on code generation, CLI flags, or helper execution.
-- Document user-facing updates in `README.md` or example projects when behaviour shifts.
-- Update this AGENTS.md guide with any relevant changes.
-- Ensure new helpers or transformations include regression tests and, where necessary, example coverage.
+- Summarise behavioural changes
+- Update `README.md` for user-facing changes
+- Update this AGENTS.md for structural changes
+- Include regression tests
