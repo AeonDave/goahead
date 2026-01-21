@@ -1,0 +1,167 @@
+package test
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/AeonDave/goahead/internal"
+)
+
+// TestSpecialStringContent tests handling of special string content
+func TestSpecialStringContent(t *testing.T) {
+	t.Run("UnicodeString", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func getEmoji() string { return "Hello 🌍🚀✨" }
+func getChinese() string { return "你好世界" }
+func getArabic() string { return "مرحبا" }
+`)
+		writeFile(t, dir, "main.go", `package main
+
+var (
+    //:getEmoji
+    emoji = ""
+    //:getChinese
+    chinese = ""
+    //:getArabic
+    arabic = ""
+)
+
+func main() {}
+`)
+		err := internal.RunCodegen(dir, false)
+		if err != nil {
+			t.Fatalf("RunCodegen failed: %v", err)
+		}
+		content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+		got := string(content)
+		if !strings.Contains(got, "🌍") {
+			t.Fatalf("emoji not preserved\n%s", got)
+		}
+		if !strings.Contains(got, "你好") {
+			t.Fatalf("chinese not preserved\n%s", got)
+		}
+	})
+
+	t.Run("NewlinesAndTabs", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func getMultiline() string { return "line1\nline2\nline3" }
+func getTabs() string { return "col1\tcol2\tcol3" }
+`)
+		writeFile(t, dir, "main.go", `package main
+
+var (
+    //:getMultiline
+    multi = ""
+    //:getTabs
+    tabs = ""
+)
+
+func main() {}
+`)
+		err := internal.RunCodegen(dir, false)
+		if err != nil {
+			t.Fatalf("RunCodegen failed: %v", err)
+		}
+	})
+
+	t.Run("VeryLongString", func(t *testing.T) {
+		dir := t.TempDir()
+		longString := strings.Repeat("a", 10000)
+		writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+import "strings"
+
+func getLongString() string { return strings.Repeat("a", 10000) }
+`)
+		writeFile(t, dir, "main.go", `package main
+
+var (
+    //:getLongString
+    long = ""
+)
+
+func main() {}
+`)
+		err := internal.RunCodegen(dir, false)
+		if err != nil {
+			t.Fatalf("RunCodegen failed: %v", err)
+		}
+		content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+		if !strings.Contains(string(content), longString[:100]) {
+			t.Fatalf("long string not handled\n")
+		}
+	})
+
+	t.Run("SQLInjectionLikeString", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func getSQLish() string { return "'; DROP TABLE users; --" }
+`)
+		writeFile(t, dir, "main.go", `package main
+
+var (
+    //:getSQLish
+    sql = ""
+)
+
+func main() {}
+`)
+		err := internal.RunCodegen(dir, false)
+		if err != nil {
+			t.Fatalf("RunCodegen failed: %v", err)
+		}
+		content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+		if !strings.Contains(string(content), "DROP TABLE") {
+			t.Fatalf("SQL-like string not preserved\n%s", string(content))
+		}
+	})
+
+	t.Run("JSONString", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func getJSON() string { 
+    return "{\"name\": \"John\", \"age\": 30, \"nested\": {\"key\": \"value\"}}" 
+}
+`)
+		writeFile(t, dir, "main.go", `package main
+
+var (
+    //:getJSON
+    jsonStr = ""
+)
+
+func main() {}
+`)
+		err := internal.RunCodegen(dir, false)
+		if err != nil {
+			t.Fatalf("RunCodegen failed: %v", err)
+		}
+		content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+		if !strings.Contains(string(content), "nested") {
+			t.Fatalf("JSON string not preserved\n%s", string(content))
+		}
+	})
+}

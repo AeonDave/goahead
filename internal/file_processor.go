@@ -171,6 +171,21 @@ func typeToString(expr ast.Expr) string {
 		return "map[" + typeToString(t.Key) + "]" + typeToString(t.Value)
 	case *ast.InterfaceType:
 		return "interface{}"
+	case *ast.Ellipsis:
+		return "..." + typeToString(t.Elt)
+	case *ast.ChanType:
+		switch t.Dir {
+		case ast.SEND:
+			return "chan<- " + typeToString(t.Value)
+		case ast.RECV:
+			return "<-chan " + typeToString(t.Value)
+		default:
+			return "chan " + typeToString(t.Value)
+		}
+	case *ast.FuncType:
+		return "func"
+	case *ast.StructType:
+		return "struct{}"
 	default:
 		return "unknown"
 	}

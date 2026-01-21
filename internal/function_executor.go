@@ -205,13 +205,33 @@ func formatExternalArguments(args []argument) []string {
 
 func formatUserArguments(fn *UserFunction, args []argument) ([]string, error) {
 	expected := fn.InputTypes
-	if len(expected) != len(args) {
-		return nil, fmt.Errorf("function %s expects %d arguments, got %d", fn.Name, len(expected), len(args))
+
+	// Check for variadic function (last param starts with ...)
+	isVariadic := len(expected) > 0 && strings.HasPrefix(expected[len(expected)-1], "...")
+
+	if isVariadic {
+		// For variadic functions, we need at least (len(expected) - 1) arguments
+		minArgs := len(expected) - 1
+		if len(args) < minArgs {
+			return nil, fmt.Errorf("function %s expects at least %d arguments, got %d", fn.Name, minArgs, len(args))
+		}
+	} else {
+		if len(expected) != len(args) {
+			return nil, fmt.Errorf("function %s expects %d arguments, got %d", fn.Name, len(expected), len(args))
+		}
 	}
 
 	formatted := make([]string, len(args))
-	for i, typ := range expected {
-		value, err := formatArgumentForType(args[i], typ)
+	for i, arg := range args {
+		var typ string
+		if i < len(expected)-1 || !isVariadic {
+			typ = expected[i]
+		} else {
+			// Variadic argument: extract element type from "...T"
+			typ = strings.TrimPrefix(expected[len(expected)-1], "...")
+		}
+
+		value, err := formatArgumentForType(arg, typ)
 		if err != nil {
 			return nil, fmt.Errorf("argument %d for %s: %w", i, fn.Name, err)
 		}
@@ -318,20 +338,29 @@ func (fe *FunctionExecutor) processFunctionFile(path string) (string, map[string
 	var builder strings.Builder
 	imports := make(map[string]struct{})
 
-	inFunction := false
+	inBlock := false // inside func, const, var, type block
 	inImportBlock := false
 	braceCount := 0
+	parenCount := 0 // for const/var/type blocks with ()
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
+		// Handle //go:ahead directives
 		if strings.HasPrefix(trimmed, "//go:ahead ") {
 			fe.handleDirective(trimmed)
 			continue
 		}
-		if strings.HasPrefix(trimmed, "//go:build") || strings.HasPrefix(trimmed, "package ") {
+
+		// Skip build tags and package declaration
+		if strings.HasPrefix(trimmed, "//go:build") || strings.HasPrefix(trimmed, "// +build") {
 			continue
 		}
+		if strings.HasPrefix(trimmed, "package ") {
+			continue
+		}
+
+		// Handle import statements
 		if strings.HasPrefix(trimmed, "import ") {
 			if strings.HasSuffix(trimmed, "(") {
 				inImportBlock = true
@@ -354,21 +383,55 @@ func (fe *FunctionExecutor) processFunctionFile(path string) (string, map[string
 			imports[trimmed] = struct{}{}
 			continue
 		}
-		if strings.HasPrefix(trimmed, "//") && !inFunction {
+
+		// Skip standalone comments when not in a block
+		if strings.HasPrefix(trimmed, "//") && !inBlock {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "func ") && !inFunction {
-			inFunction = true
-			braceCount = 0
+
+		// Detect start of top-level declarations
+		if !inBlock {
+			if strings.HasPrefix(trimmed, "func ") {
+				inBlock = true
+				braceCount = 0
+			} else if strings.HasPrefix(trimmed, "const ") ||
+				strings.HasPrefix(trimmed, "var ") ||
+				strings.HasPrefix(trimmed, "type ") {
+				inBlock = true
+				parenCount = 0
+				braceCount = 0
+			}
 		}
-		if inFunction {
+
+		if inBlock {
 			builder.WriteString(line)
 			builder.WriteByte('\n')
-			braceCount += strings.Count(line, "{")
-			braceCount -= strings.Count(line, "}")
-			if braceCount == 0 && strings.Contains(line, "}") {
-				inFunction = false
-				builder.WriteByte('\n')
+
+			// Count braces and parens to detect end of block
+			for _, r := range line {
+				switch r {
+				case '{':
+					braceCount++
+				case '}':
+					braceCount--
+				case '(':
+					parenCount++
+				case ')':
+					parenCount--
+				}
+			}
+
+			// Check if block is complete
+			// For func: ends when braceCount returns to 0 after being > 0
+			// For const/var/type: ends when line doesn't end with ( and parenCount == 0, or single line
+			if braceCount == 0 && parenCount == 0 {
+				// Check if it's a complete declaration
+				if strings.Contains(line, "}") ||
+					strings.Contains(line, ")") ||
+					(!strings.HasSuffix(trimmed, "(") && !strings.HasSuffix(trimmed, "{") && !strings.HasSuffix(trimmed, ",")) {
+					inBlock = false
+					builder.WriteByte('\n')
+				}
 			}
 		}
 	}
@@ -396,11 +459,14 @@ func (fe *FunctionExecutor) handleDirective(line string) {
 
 func splitArguments(input string) ([]string, error) {
 	var (
-		parts   []string
-		current strings.Builder
-		inQuote bool
-		quote   rune
-		escape  bool
+		parts      []string
+		current    strings.Builder
+		inQuote    bool
+		quote      rune
+		escape     bool
+		braceDepth int
+		parenDepth int
+		brackDepth int
 	)
 
 	for _, r := range input {
@@ -408,7 +474,8 @@ func splitArguments(input string) ([]string, error) {
 		case escape:
 			current.WriteRune(r)
 			escape = false
-		case r == '\\':
+		case r == '\\' && inQuote:
+			current.WriteRune(r)
 			escape = true
 		case inQuote:
 			current.WriteRune(r)
@@ -419,7 +486,25 @@ func splitArguments(input string) ([]string, error) {
 			inQuote = true
 			quote = r
 			current.WriteRune(r)
-		case r == ':':
+		case r == '{':
+			braceDepth++
+			current.WriteRune(r)
+		case r == '}':
+			braceDepth--
+			current.WriteRune(r)
+		case r == '(':
+			parenDepth++
+			current.WriteRune(r)
+		case r == ')':
+			parenDepth--
+			current.WriteRune(r)
+		case r == '[':
+			brackDepth++
+			current.WriteRune(r)
+		case r == ']':
+			brackDepth--
+			current.WriteRune(r)
+		case r == ':' && braceDepth == 0 && parenDepth == 0 && brackDepth == 0:
 			parts = append(parts, strings.TrimSpace(current.String()))
 			current.Reset()
 		default:

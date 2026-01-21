@@ -40,5 +40,10 @@ var (
 		"/internal/",
 		"/vendor/",
 		"/pkg/mod/",
+		// Windows paths
+		"\\runtime\\",
+		"\\internal\\",
+		"\\vendor\\",
+		"\\pkg\\mod\\",
 	}
 )

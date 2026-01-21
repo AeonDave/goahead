@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// writeFile is a helper function for creating test files
 func writeFile(t *testing.T, dir, rel, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, rel)
