@@ -57,47 +57,54 @@ type FunctionExecutor struct {
 
 	cache map[string]string
 
-	userFunctionsSource string
-	userImportSet       map[string]struct{}
-	prepared            bool
+	// Cache for prepared code per directory
+	preparedByDir map[string]*preparedCode
 
 	stdImportMap map[string]string
 	stdListErr   error
 }
 
+type preparedCode struct {
+	source    string
+	importSet map[string]struct{}
+}
+
 func NewFunctionExecutor(ctx *ProcessorContext) *FunctionExecutor {
 	return &FunctionExecutor{
-		ctx:   ctx,
-		cache: make(map[string]string),
+		ctx:           ctx,
+		cache:         make(map[string]string),
+		preparedByDir: make(map[string]*preparedCode),
 	}
 }
 
 func (fe *FunctionExecutor) Prepare() error {
-	return fe.ensureUserFunctionsPrepared()
+	// No-op now, preparation happens on demand per directory
+	return nil
 }
 
-func (fe *FunctionExecutor) ExecuteFunction(funcName string, argsStr string) (string, error) {
+func (fe *FunctionExecutor) ExecuteFunction(funcName string, argsStr string, sourceDir string) (string, *UserFunction, error) {
 	args, err := fe.parseArguments(argsStr)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
-	target, err := fe.determineTarget(funcName)
+	target, err := fe.determineTarget(funcName, sourceDir)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
-	key, err := fe.cacheKey(target, args)
+	// Include sourceDir in cache key for hierarchical resolution
+	key, err := fe.cacheKeyWithDir(target, args, sourceDir)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if cached, ok := fe.cache[key]; ok {
-		return cached, nil
+		return cached, target.userFunc, nil
 	}
 
 	formattedArgs, err := fe.formatArguments(target, args)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	callExpr := target.callExpr
@@ -107,9 +114,9 @@ func (fe *FunctionExecutor) ExecuteFunction(funcName string, argsStr string) (st
 		callExpr = fmt.Sprintf("%s()", target.callExpr)
 	}
 
-	program, err := fe.buildProgram(target, callExpr)
+	program, err := fe.buildProgramForDir(target, callExpr, sourceDir)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	result, err := fe.executeProgram(program)
@@ -123,13 +130,13 @@ func (fe *FunctionExecutor) ExecuteFunction(funcName string, argsStr string) (st
 			if fe.stdListErr != nil {
 				extra = fmt.Sprintf(" (automatic standard library resolution failed: %v)", fe.stdListErr)
 			}
-			return "", fmt.Errorf("%w. Add //go:ahead import %s in a function file to declare the package alias%s", err, suggestion, extra)
+			return "", nil, fmt.Errorf("%w. Add //go:ahead import %s in a function file to declare the package alias%s", err, suggestion, extra)
 		}
-		return "", err
+		return "", nil, err
 	}
 
 	fe.cache[key] = result
-	return result, nil
+	return result, target.userFunc, nil
 }
 
 func (fe *FunctionExecutor) parseArguments(argsStr string) ([]argument, error) {
@@ -149,8 +156,10 @@ func (fe *FunctionExecutor) parseArguments(argsStr string) ([]argument, error) {
 	return args, nil
 }
 
-func (fe *FunctionExecutor) determineTarget(funcName string) (callTarget, error) {
-	if fn, ok := fe.ctx.Functions[funcName]; ok {
+func (fe *FunctionExecutor) determineTarget(funcName string, sourceDir string) (callTarget, error) {
+	// Use hierarchical resolution: walk up from sourceDir to find the function
+	if fn, helperPath := fe.ctx.ResolveFunction(funcName, sourceDir); fn != nil {
+		_ = helperPath // Used for logging in caller
 		return callTarget{
 			kind:     invocationUser,
 			userFunc: fn,
@@ -177,9 +186,6 @@ func (fe *FunctionExecutor) determineTarget(funcName string) (callTarget, error)
 func (fe *FunctionExecutor) resolveImportPath(alias string) (string, bool) {
 	if alias == "" {
 		return "", false
-	}
-	if path, ok := fe.ctx.ImportOverrides[alias]; ok {
-		return path, true
 	}
 	fe.ensureStdImportMap()
 	if path, ok := fe.stdImportMap[alias]; ok && path != "" {
@@ -240,13 +246,14 @@ func formatUserArguments(fn *UserFunction, args []argument) ([]string, error) {
 	return formatted, nil
 }
 
-func (fe *FunctionExecutor) buildProgram(target callTarget, callExpr string) (string, error) {
-	if err := fe.ensureUserFunctionsPrepared(); err != nil {
+func (fe *FunctionExecutor) buildProgramForDir(target callTarget, callExpr string, sourceDir string) (string, error) {
+	prepared, err := fe.ensurePreparedForDir(sourceDir)
+	if err != nil {
 		return "", err
 	}
 
 	importSet := make(map[string]struct{})
-	for spec := range fe.userImportSet {
+	for spec := range prepared.importSet {
 		importSet[spec] = struct{}{}
 	}
 
@@ -269,7 +276,7 @@ func (fe *FunctionExecutor) buildProgram(target callTarget, callExpr string) (st
 		FmtAlias string
 	}{
 		Imports:  imports,
-		UserCode: strings.TrimSpace(fe.userFunctionsSource),
+		UserCode: strings.TrimSpace(prepared.source),
 		CallExpr: callExpr,
 		FmtAlias: evalFmtAlias,
 	}
@@ -287,6 +294,159 @@ func (fe *FunctionExecutor) buildProgram(target callTarget, callExpr string) (st
 	return string(formatted), nil
 }
 
+// ensurePreparedForDir prepares code with only the functions visible from sourceDir
+func (fe *FunctionExecutor) ensurePreparedForDir(sourceDir string) (*preparedCode, error) {
+	if prepared, ok := fe.preparedByDir[sourceDir]; ok {
+		return prepared, nil
+	}
+
+	// Collect visible helper files by walking up from sourceDir
+	visibleFiles := fe.collectVisibleHelperFiles(sourceDir)
+
+	var pieces []string
+	importSet := make(map[string]struct{})
+	seenFunctions := make(map[string]bool)
+
+	// Process files in order from closest to furthest (local shadows global)
+	for _, file := range visibleFiles {
+		code, imports, funcs := fe.processFunctionFileWithNames(file)
+
+		// Filter out functions that are already defined (shadowed)
+		filteredCode := fe.filterShadowedFunctions(code, funcs, seenFunctions)
+
+		if filteredCode != "" {
+			pieces = append(pieces, filteredCode)
+		}
+		for spec := range imports {
+			importSet[spec] = struct{}{}
+		}
+		// Mark these functions as seen
+		for _, fn := range funcs {
+			seenFunctions[fn] = true
+		}
+	}
+
+	prepared := &preparedCode{
+		source:    strings.Join(pieces, "\n\n"),
+		importSet: importSet,
+	}
+	fe.preparedByDir[sourceDir] = prepared
+
+	return prepared, nil
+}
+
+// collectVisibleHelperFiles returns helper files visible from sourceDir, ordered from closest to furthest
+func (fe *FunctionExecutor) collectVisibleHelperFiles(sourceDir string) []string {
+	var result []string
+	dirToFiles := make(map[string][]string)
+
+	// Group helper files by directory
+	for _, file := range fe.ctx.FuncFiles {
+		dir := filepath.Dir(file)
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			absDir = dir
+		}
+		dirToFiles[absDir] = append(dirToFiles[absDir], file)
+	}
+
+	// Walk up from sourceDir and collect files
+	visited := make(map[string]bool)
+	for dir := sourceDir; ; dir = parentDir(dir) {
+		if visited[dir] {
+			break
+		}
+		visited[dir] = true
+
+		if files, ok := dirToFiles[dir]; ok {
+			result = append(result, files...)
+		}
+
+		// Stop at root
+		if dir == fe.ctx.RootDir || dir == "." || dir == "" || dir == parentDir(dir) {
+			break
+		}
+	}
+
+	// Ensure we check RootDir
+	if !visited[fe.ctx.RootDir] {
+		if files, ok := dirToFiles[fe.ctx.RootDir]; ok {
+			result = append(result, files...)
+		}
+	}
+
+	return result
+}
+
+// filterShadowedFunctions removes function declarations that are already in seenFunctions
+func (fe *FunctionExecutor) filterShadowedFunctions(code string, funcs []string, seen map[string]bool) string {
+	// Quick check: if no overlap, return original code
+	hasOverlap := false
+	for _, fn := range funcs {
+		if seen[fn] {
+			hasOverlap = true
+			break
+		}
+	}
+	if !hasOverlap {
+		return code
+	}
+
+	// Need to filter - parse and remove shadowed functions
+	lines := strings.Split(code, "\n")
+	var result []string
+	inFunc := false
+	skipFunc := false
+	braceCount := 0
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if !inFunc {
+			// Check if this starts a function we should skip
+			if strings.HasPrefix(trimmed, "func ") {
+				// Extract function name
+				name := extractFuncName(trimmed)
+				if name != "" && seen[name] {
+					skipFunc = true
+					inFunc = true
+					braceCount = strings.Count(line, "{") - strings.Count(line, "}")
+					continue
+				}
+				inFunc = true
+				braceCount = strings.Count(line, "{") - strings.Count(line, "}")
+			}
+		} else {
+			braceCount += strings.Count(line, "{") - strings.Count(line, "}")
+			if braceCount <= 0 {
+				inFunc = false
+				if skipFunc {
+					skipFunc = false
+					continue
+				}
+			}
+		}
+
+		if !skipFunc {
+			result = append(result, line)
+		}
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// extractFuncName extracts the function name from a "func name(" line
+func extractFuncName(line string) string {
+	// Remove "func " prefix
+	rest := strings.TrimPrefix(line, "func ")
+	// Find opening paren
+	parenIdx := strings.Index(rest, "(")
+	if parenIdx == -1 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:parenIdx])
+}
+
 func (fe *FunctionExecutor) executeProgram(program string) (string, error) {
 	tempFile := filepath.Join(fe.ctx.TempDir, "goahead_eval.go")
 	if err := os.WriteFile(tempFile, []byte(program), 0o600); err != nil {
@@ -301,31 +461,6 @@ func (fe *FunctionExecutor) executeProgram(program string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(output)), nil
-}
-
-func (fe *FunctionExecutor) ensureUserFunctionsPrepared() error {
-	if fe.prepared {
-		return nil
-	}
-
-	var pieces []string
-	importSet := make(map[string]struct{})
-
-	for _, file := range fe.ctx.FuncFiles {
-		code, imports := fe.processFunctionFile(file)
-		if code != "" {
-			pieces = append(pieces, code)
-		}
-		for spec := range imports {
-			importSet[spec] = struct{}{}
-		}
-	}
-
-	fe.userFunctionsSource = strings.Join(pieces, "\n\n")
-	fe.userImportSet = importSet
-	fe.prepared = true
-
-	return nil
 }
 
 func (fe *FunctionExecutor) processFunctionFile(path string) (string, map[string]struct{}) {
@@ -346,14 +481,11 @@ func (fe *FunctionExecutor) processFunctionFile(path string) (string, map[string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// Handle //go:ahead directives
-		if strings.HasPrefix(trimmed, "//go:ahead ") {
-			fe.handleDirective(trimmed)
-			continue
-		}
-
 		// Skip build tags and package declaration
 		if strings.HasPrefix(trimmed, "//go:build") || strings.HasPrefix(trimmed, "// +build") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "//go:ahead") {
 			continue
 		}
 		if strings.HasPrefix(trimmed, "package ") {
@@ -439,22 +571,111 @@ func (fe *FunctionExecutor) processFunctionFile(path string) (string, map[string
 	return strings.TrimSpace(builder.String()), imports
 }
 
-func (fe *FunctionExecutor) handleDirective(line string) {
-	directive := strings.TrimSpace(strings.TrimPrefix(line, "//go:ahead"))
-	if !strings.HasPrefix(directive, "import") {
-		return
+// processFunctionFileWithNames is like processFunctionFile but also returns function names
+func (fe *FunctionExecutor) processFunctionFileWithNames(path string) (string, map[string]struct{}, []string) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", make(map[string]struct{}), nil
 	}
-	spec := strings.TrimSpace(strings.TrimPrefix(directive, "import"))
-	parts := strings.SplitN(spec, "=", 2)
-	if len(parts) != 2 {
-		return
+
+	lines := strings.Split(string(content), "\n")
+	var builder strings.Builder
+	imports := make(map[string]struct{})
+	var funcNames []string
+
+	inBlock := false
+	inImportBlock := false
+	braceCount := 0
+	parenCount := 0
+	currentFuncName := ""
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "//go:build") || strings.HasPrefix(trimmed, "// +build") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "//go:ahead") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "package ") {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "import ") {
+			if strings.HasSuffix(trimmed, "(") {
+				inImportBlock = true
+			} else {
+				spec := strings.TrimSpace(strings.TrimPrefix(trimmed, "import"))
+				if spec != "" {
+					imports[spec] = struct{}{}
+				}
+			}
+			continue
+		}
+		if inImportBlock {
+			if trimmed == ")" {
+				inImportBlock = false
+				continue
+			}
+			if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+				continue
+			}
+			imports[trimmed] = struct{}{}
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "//") && !inBlock {
+			continue
+		}
+
+		if !inBlock {
+			if strings.HasPrefix(trimmed, "func ") {
+				inBlock = true
+				braceCount = 0
+				currentFuncName = extractFuncName(trimmed)
+				if currentFuncName != "" {
+					funcNames = append(funcNames, currentFuncName)
+				}
+			} else if strings.HasPrefix(trimmed, "const ") ||
+				strings.HasPrefix(trimmed, "var ") ||
+				strings.HasPrefix(trimmed, "type ") {
+				inBlock = true
+				parenCount = 0
+				braceCount = 0
+			}
+		}
+
+		if inBlock {
+			builder.WriteString(line)
+			builder.WriteByte('\n')
+
+			for _, r := range line {
+				switch r {
+				case '{':
+					braceCount++
+				case '}':
+					braceCount--
+				case '(':
+					parenCount++
+				case ')':
+					parenCount--
+				}
+			}
+
+			if braceCount == 0 && parenCount == 0 {
+				if strings.Contains(line, "}") ||
+					strings.Contains(line, ")") ||
+					(!strings.HasSuffix(trimmed, "(") && !strings.HasSuffix(trimmed, "{") && !strings.HasSuffix(trimmed, ",")) {
+					inBlock = false
+					builder.WriteByte('\n')
+					currentFuncName = ""
+				}
+			}
+		}
 	}
-	alias := strings.TrimSpace(parts[0])
-	path := strings.TrimSpace(parts[1])
-	path = strings.Trim(path, "`\"'")
-	if alias != "" && path != "" {
-		fe.ctx.ImportOverrides[alias] = path
-	}
+
+	return strings.TrimSpace(builder.String()), imports, funcNames
 }
 
 func splitArguments(input string) ([]string, error) {
@@ -675,6 +896,15 @@ func (fe *FunctionExecutor) cacheKey(target callTarget, args []argument) (string
 		return "", err
 	}
 	return string(data), nil
+}
+
+func (fe *FunctionExecutor) cacheKeyWithDir(target callTarget, args []argument, sourceDir string) (string, error) {
+	baseKey, err := fe.cacheKey(target, args)
+	if err != nil {
+		return "", err
+	}
+	// Include sourceDir in key to handle shadowing properly
+	return fmt.Sprintf("%s|%s", sourceDir, baseKey), nil
 }
 
 func sanitizeGoEnv(env []string) []string {

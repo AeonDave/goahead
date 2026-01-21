@@ -47,7 +47,6 @@ func main() {}
 		dir := t.TempDir()
 		writeFile(t, dir, "helpers.go", `//go:build exclude
 //go:ahead functions
-//go:ahead import http=net/http
 
 package main
 `)

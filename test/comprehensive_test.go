@@ -388,41 +388,6 @@ func main() {}
 	// quindi verifichiamo solo che il file sia valido
 }
 
-// TestImportAliases verifica la gestione degli alias di import personalizzati
-func TestImportAliases(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "helpers.go", `//go:build exclude
-//go:ahead functions
-//go:ahead import mystrings=strings
-//go:ahead import myos=os
-
-package main
-`)
-	writeFile(t, dir, "main.go", `package main
-
-var (
-    //:mystrings.ToUpper:"hello"
-    upper = ""
-)
-
-func main() {}
-`)
-	err := internal.RunCodegen(dir, false)
-	if err != nil {
-		t.Fatalf("RunCodegen failed: %v", err)
-	}
-
-	content, err := os.ReadFile(filepath.Join(dir, "main.go"))
-	if err != nil {
-		t.Fatalf("read main.go: %v", err)
-	}
-	got := string(content)
-
-	if !strings.Contains(got, `upper = "HELLO"`) {
-		t.Fatalf("aliased import not working\n---- got ----\n%s", got)
-	}
-}
-
 // TestMultipleFunctionFiles verifica la gestione di più file di funzioni
 func TestMultipleFunctionFiles(t *testing.T) {
 	dir := t.TempDir()

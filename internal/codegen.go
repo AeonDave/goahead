@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,10 +15,19 @@ func RunCodegen(dir string, verbose bool) error {
 		fmt.Printf("  dir: '%s'\n", dir)
 		fmt.Printf("  verbose: %t\n", verbose)
 	}
+
+	// Get absolute path for RootDir
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		absDir = dir
+	}
+
 	ctx := &ProcessorContext{
-		Functions:       make(map[string]*UserFunction),
-		FileSet:         token.NewFileSet(),
-		ImportOverrides: make(map[string]string),
+		Functions:      make(map[string]*UserFunction),
+		FunctionsByDir: make(map[string]map[string]*UserFunction),
+		RootDir:        absDir,
+		Verbose:        verbose,
+		FileSet:        token.NewFileSet(),
 	}
 	tempDir, err := os.MkdirTemp("", "codegen-*")
 	if err != nil {
@@ -30,6 +40,8 @@ func RunCodegen(dir string, verbose bool) error {
 	fileProcessor := NewFileProcessor(ctx)
 	executor := NewFunctionExecutor(ctx)
 	codeProcessor := NewCodeProcessor(ctx, executor)
+	injector := NewInjector(ctx)
+
 	if err := fileProcessor.FindFunctionFiles(dir); err != nil {
 		return fmt.Errorf("failed to find function files: %v", err)
 	}
@@ -50,6 +62,13 @@ func RunCodegen(dir string, verbose bool) error {
 	if verbose {
 		printLoadedInfo(ctx)
 	}
+
+	// First pass: handle function injections
+	if err := fileProcessor.ProcessDirectoryInjections(dir, verbose, injector); err != nil {
+		return fmt.Errorf("error processing injections: %v", err)
+	}
+
+	// Second pass: handle value replacements
 	if err := fileProcessor.ProcessDirectory(dir, verbose, codeProcessor); err != nil {
 		return fmt.Errorf("error processing directory: %v", err)
 	}
@@ -66,8 +85,16 @@ func printLoadedInfo(ctx *ProcessorContext) {
 		fmt.Printf("  - %s\n", file)
 	}
 
-	fmt.Printf("Loaded %d user functions:\n", len(ctx.Functions))
-	for name, fn := range ctx.Functions {
-		fmt.Printf("  - %s(%s) %s\n", name, strings.Join(fn.InputTypes, ", "), fn.OutputType)
+	// Show functions organized by directory
+	totalFuncs := 0
+	for _, funcs := range ctx.FunctionsByDir {
+		totalFuncs += len(funcs)
+	}
+	fmt.Printf("Loaded %d user functions in %d directories:\n", totalFuncs, len(ctx.FunctionsByDir))
+	for dir, funcs := range ctx.FunctionsByDir {
+		fmt.Printf("  Directory: %s\n", dir)
+		for name, fn := range funcs {
+			fmt.Printf("    - %s(%s) %s\n", name, strings.Join(fn.InputTypes, ", "), fn.OutputType)
+		}
 	}
 }

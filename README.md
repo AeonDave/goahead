@@ -1,6 +1,6 @@
 # GoAhead → Compile-time Code Generation for Go
 
-GoAhead plugs into the Go toolchain and replaces lightweight placeholder comments with real values **before** your code is compiled. Helpers that you keep alongside your project are executed at build time, so your runtime code stays clean while still benefiting from generated constants, strings, configuration, or any other deterministic value.
+GoAhead is a compile-time code generation tool for Go. It replaces placeholder comments with computed values at build time.
 
 [![CodeQL Advanced](https://github.com/AeonDave/goahead/actions/workflows/codeql.yml/badge.svg)](https://github.com/AeonDave/goahead/actions/workflows/codeql.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/AeonDave/goahead)](https://goreportcard.com/report/github.com/AeonDave/goahead)
@@ -12,13 +12,14 @@ GoAhead plugs into the Go toolchain and replaces lightweight placeholder comment
 
 ## Highlights
 
-- Works with every Go command via `-toolexec` (build, test, run, generate)
-- Intelligent placeholder replacement keeps surrounding expressions intact
-- Understands parameterised helpers, raw Go expressions, and simple type inference
-- Supports standard-library packages and custom aliases through `//go:ahead import`
-- Full support for variadic functions, constants, type definitions, and complex expressions
+- Works with Go commands via `-toolexec` (build, test, run, generate)
+- Placeholder replacement keeps surrounding expressions intact
+- Supports parameterised helpers, raw Go expressions, and simple type inference
+- Supports standard-library packages directly (strings, strconv, os, http, etc.)
+- Hierarchical function inheritance: subdirectories can shadow parent functions
+- Supports variadic functions, constants, type definitions, and complex expressions
 - Cross-platform compatible (Linux, macOS, Windows)
-- Ships with ready-to-run examples and an integration test suite
+- Includes examples and an integration test suite
 
 ## Installation
 
@@ -43,33 +44,16 @@ import "strings"
 func welcome(name string) string {
     return "Hello, " + strings.ToUpper(name)
 }
-
-func port() int { return 8080 }
 ```
 
-### 2. Reference helpers from your code
-
-Placeholders use the form `//:functionName[:arg1[:argN]]` and attach to the statement they decorate.
+### 2. Reference helpers + build
 
 ```go
 package main
 
-import "fmt"
-
-var (
-    //:welcome:"gopher"
-    greeting = ""
-
-    //:port
-    listenPort = 0
-)
-
-func main() {
-    fmt.Printf("%s on %d\n", greeting, listenPort)
-}
+//:welcome:"gopher"
+var greeting = ""
 ```
-
-### 3. Build with GoAhead
 
 ```bash
 go build -toolexec="goahead" ./...
@@ -212,16 +196,31 @@ func statusName(s Status) string {
 
 ### Multiple Helper Files
 
-Organize helpers across multiple files - all functions are available:
+GoAhead scans the entire directory tree and resolves functions using **hierarchical inheritance**:
+
+- Functions resolve **bottom-up** from source file's directory to root
+- A source file "sees" functions from its own directory + all ancestors
+- **Local shadows parent**: A subdirectory's function overrides the parent's function of the same name
+- **Siblings are isolated**: `pkg1/` cannot see `pkg2/`'s functions (only common ancestors)
 
 ```
 project/
-├── helpers/
-│   ├── config.go      # //go:ahead functions
-│   ├── formatting.go  # //go:ahead functions
-│   └── crypto.go      # //go:ahead functions
-└── main.go
+├── helpers.go        # version() -> "1.0.0", common() -> "shared"
+├── main.go           # uses version() → "1.0.0", common() → "shared"
+├── pkg1/
+│   ├── helpers.go    # version() -> "2.0.0-pkg1"  ← shadows root
+│   └── main.go       # uses version() → "2.0.0-pkg1", common() → "shared"
+└── pkg2/
+    └── main.go       # uses version() → "1.0.0", common() → "shared"
 ```
+
+**Console output** shows which helper file was used:
+```
+[goahead] Replaced in pkg1/main.go: version() -> "2.0.0-pkg1" (from pkg1/helpers.go)
+[goahead] WARNING: Function 'version' in pkg1/helpers.go shadows function in helpers.go
+```
+
+⚠️ **Duplicate function names in the same directory cause a fatal error** - GoAhead will exit with an error showing both file locations.
 
 ---
 
@@ -240,67 +239,101 @@ home = ""   // → "/home/user"
 
 //:strconv.Itoa:42
 str = ""    // → "42"
-```
 
-### Import Aliases
-
-Declare aliases for any package in your helper file:
-
-```go
-//go:ahead import http=net/http
-//go:ahead import filepath=path/filepath
-//go:ahead import b64=encoding/base64
-```
-
-Then use them in placeholders:
-
-```go
 //:http.DetectContentType:=[]byte("PNG data")
-mime = ""
-
-//:filepath.Base:"/usr/local/bin/app"
-name = ""
-
-//:b64.StdEncoding.EncodeToString:=[]byte("secret")
-encoded = ""
+mime = ""   // → "application/octet-stream"
 ```
 
 ---
 
-## Compatibility with Go Directives
+## Function Injection
 
-GoAhead preserves all standard Go directives:
+GoAhead can **inject entire functions** from helper files into your source code. This is useful for obfuscation scenarios where you need both an encoding function (executed at build time) and a decoding function (included in runtime).
 
-| Directive | Preserved | Notes |
-|-----------|-----------|-------|
-| `//go:build` | ✅ | Build constraints |
-| `// +build` | ✅ | Legacy build tags |
-| `//go:generate` | ✅ | Code generation |
-| `//go:embed` | ✅ | Embed files |
-| `//go:noinline` | ✅ | Compiler hints |
-| `//go:nosplit` | ✅ | Stack management |
-| `//go:linkname` | ✅ | Symbol linking |
+### Basic Syntax
 
-Example mixing GoAhead with Go directives:
+```
+//:inject:FunctionName
+```
 
+### Example: String Obfuscation
+
+**Helper file** (`helpers.go`):
 ```go
-//go:build linux || darwin
+//go:build exclude
+//go:ahead functions
 
 package main
 
-//go:generate stringer -type=Status
+const xorKey byte = 0x42
 
-//go:embed config.json
-var configData string
+func Shadow(s string) string {
+    result := ""
+    for _, c := range s {
+        result += string(byte(c) ^ xorKey)
+    }
+    return result
+}
 
-var (
-    //:getVersion
-    version = ""
-)
-
-//go:noinline
-func criticalPath() { /* ... */ }
+func Unshadow(s string) string {
+    result := ""
+    for _, c := range s {
+        result += string(byte(c) ^ xorKey)
+    }
+    return result
+}
 ```
+
+**Source file** (`main.go`):
+```go
+package main
+
+import "fmt"
+
+//:Shadow:"secret password"
+var encrypted = ""
+
+//:inject:Unshadow
+
+func main() {
+    fmt.Println(Unshadow(encrypted))
+}
+```
+
+**After processing**:
+```go
+package main
+
+import "fmt"
+
+const xorKey byte = 0x42  // Dependency copied automatically
+
+var encrypted = "1'!0'6r2#115/0&"
+
+func Unshadow(s string) string {
+    result := ""
+    for _, c := range s {
+        result += string(byte(c) ^ xorKey)
+    }
+    return result
+}
+
+func main() {
+    fmt.Println(Unshadow(encrypted))
+}
+```
+
+### What Gets Injected
+
+When you use `//:inject:FunctionName`, GoAhead:
+
+1. **Copies the function** from the helper file (the marker line is replaced)
+2. **Adds required imports** used by the function (single-line imports are upgraded to a block when needed)
+3. **Includes dependencies** (constants, variables, types) that the function uses
+4. **Includes helper-to-helper dependencies** (other helper functions called by the injected function)
+5. **Respects hierarchy** - uses the function from the nearest helper file
+
+If the function is not found, GoAhead leaves the marker line untouched and prints a warning.
 
 ---
 
@@ -329,28 +362,6 @@ CGO preambles, directives, and comments are fully preserved.
 
 ---
 
-## Project Layout Examples
-
-| Directory | Demonstrates |
-|-----------|--------------|
-| `examples/base` | Basic helpers returning strings, ints |
-| `examples/config` | Configuration struct, CSV sanitization, env values |
-| `examples/stdlib_e` | Standard library calls via aliases |
-| `examples/report` | Multi-argument helpers, formatting |
-| `examples/variadic` | Variadic function support |
-| `examples/constants` | Constants, variables, custom types in helpers |
-| `examples/expressions` | Complex expressions with maps, structs, slices |
-| `examples/types` | Custom type definitions and usage |
-| `examples/directives` | Mixing GoAhead with Go directives |
-
-Run any example:
-
-```bash
-go run -toolexec="goahead" ./examples/variadic
-```
-
----
-
 ## Command-line Reference
 
 ```
@@ -372,42 +383,6 @@ GOAHEAD_VERBOSE=1   # Force verbose output when invoked via toolexec
 
 ---
 
-## Testing
-
-Integration tests under `test/` spin up temporary modules and assert the emitted Go source:
-
-```bash
-go test ./test/...           # All tests
-go test ./test/... -v        # Verbose output
-go test ./test/... -race     # Race detection
-```
-
-Test categories:
-- **Grammar tests**: Placeholder syntax variations
-- **Argument parsing**: All numeric formats, strings, escaping
-- **Expression tests**: Maps, structs, slices with colons
-- **Import tests**: Aliases, stdlib resolution
-- **Directive tests**: Preserving //go: directives
-- **CGO tests**: CGO compatibility
-- **Cross-platform**: Windows/Unix path handling
-
----
-
-## Best Practices
-
-1. **Keep helpers deterministic** - No random values, no time-dependent output unless intentional
-2. **Avoid side effects** - Helpers should be pure functions for reproducible builds
-3. **Use multiple helper files** - Organize by domain (config, crypto, formatting)
-4. **Prefer explicit types** - Return concrete types, avoid `interface{}`
-5. **Test your helpers** - Write unit tests for complex helper logic
-6. **Document placeholders** - Add comments explaining what each placeholder generates
-
----
-
-## Troubleshooting
-
-### Placeholder not replaced
-
 - Ensure helper file has both `//go:build exclude` and `//go:ahead functions`
 - Check function name matches exactly (case-sensitive)
 - Verify argument count matches function signature
@@ -426,9 +401,3 @@ Test categories:
 
 - GoAhead preserves CGO preambles - check C code syntax separately
 - Ensure `import "C"` appears alone after the preamble
-
----
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.

@@ -14,7 +14,6 @@ func TestRunCodegenIntegration(t *testing.T) {
 
 	writeFile(t, dir, "helpers.go", `//go:build exclude
 //go:ahead functions
-//go:ahead import http=net/http
 
 package main
 
@@ -63,6 +62,10 @@ func main() {
 }
 `)
 
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
+
 	if err := internal.RunCodegen(dir, false); err != nil {
 		t.Fatalf("RunCodegen failed: %v", err)
 	}
@@ -87,4 +90,7 @@ func main() {
 			t.Fatalf("output missing %q\n---- got ----\n%s", want, got)
 		}
 	}
+
+	// Verify generated code compiles
+	verifyCompiles(t, dir)
 }

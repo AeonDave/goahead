@@ -2,6 +2,7 @@ package test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -17,4 +18,16 @@ func writeFile(t *testing.T, dir, rel, content string) string {
 		t.Fatalf("write %s: %v", path, err)
 	}
 	return path
+}
+
+// verifyCompiles checks that the generated Go code actually compiles
+func verifyCompiles(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("go", "build", "-o", filepath.Join(dir, "test_binary"), ".")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Generated code does not compile:\n%s\nError: %v", string(output), err)
+	}
 }

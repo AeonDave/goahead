@@ -1,81 +1,94 @@
 # GoAhead Agents Guide
 
-## What GoAhead Does
+> **For AI Agents**: This document is optimized for LLM consumption. Read this FIRST before modifying any code.
 
-GoAhead is a compile-time code generation tool for Go. It replaces placeholder comments with computed values at build time.
+## TL;DR - What GoAhead Does
 
-**Toolexec mode** (recommended):
+GoAhead is a **compile-time code generation tool** for Go that:
+1. Scans for placeholder comments (`//:functionName:args`)
+2. Executes helper functions defined in separate files
+3. Replaces placeholder values with function results at build time
+
+**Key insight**: The placeholder comment + the literal value on the next line form a pair. GoAhead replaces ONLY the literal value.
+
+---
+
+## Quick Reference
+
+### Marker Syntax
+```
+//go:build exclude                            ← Helper files are excluded from normal builds
+//go:ahead functions                          ← Marks a file as a helper/function file
+
+//:functionName:arg1:arg2:...                 ← Placeholder (goes immediately ABOVE the target statement)
+someStatement = literalValue                  ← GoAhead replaces the first matching literal in this statement
+```
+
+### Argument Types
+| Type | Syntax | Examples |
+|------|--------|----------|
+| String | `"quoted"` or `` `raw` `` | `"hello"`, `` `world` `` |
+| Int | decimal, hex, binary, octal | `42`, `0x1F`, `0b101`, `0o17` |
+| Float | decimal with optional exponent | `3.14`, `-2.5`, `1e-10` |
+| Bool | `true` or `false` | `true`, `false` |
+
+---
+
+## Usage Modes
+
+**Toolexec (recommended)**:
 ```bash
 go build -toolexec="goahead" ./...
 ```
 
-**Standalone mode**:
+**Standalone**:
 ```bash
 goahead -dir=./mypackage
 ```
 
-## Placeholder Grammar
+---
 
-### File Marker (required in files using placeholders)
-```
-//go:ahead [helpers.go] [stdlib:strings,fmt]
-```
-- `[helpers.go]`: Optional helper file containing functions to execute
-- `[stdlib:pkg1,pkg2]`: Optional stdlib packages to use directly
+## Complete Example
 
-### Placeholder Syntax
-```
-//:functionName:arg1:arg2:...
-nextLineValue
-```
-
-The placeholder comment MUST be immediately followed by a literal value on the next line. GoAhead replaces that literal with the function's return value.
-
-### Argument Types
-| Type | Example | Notes |
-|------|---------|-------|
-| String | `"hello"` or `` `raw` `` | Quoted or backtick |
-| Int | `42`, `-5`, `0x1F`, `0b101` | Decimal, hex, binary, octal |
-| Float | `3.14`, `-2.5`, `1e-10` | Scientific notation supported |
-| Bool | `true`, `false` | |
-
-### Examples
-
-**Helper file** (`helpers.go`):
+### Helper file (`helpers.go`)
 ```go
-//go:build ignore
+//go:build exclude
+//go:ahead functions
 
-package main
+package helpers
 
 func version() string { return "1.0.0" }
 func add(a, b int) int { return a + b }
 func greet(name string) string { return "Hello, " + name }
 ```
 
-**Source file** (`main.go`):
+### Source file (`main.go`)
 ```go
-//go:ahead helpers.go
-
 package main
 
-const Version = //:version:
-"placeholder"
+//:version:
+const Version = "placeholder"
 
-const Sum = //:add:10:20
-0
+//:add:10:20
+const Sum = 0
 
-const Greeting = //:greet:"World"
-""
+//:greet:"World"
+const Greeting = ""
 ```
 
-**After processing**:
+### After processing
 ```go
 const Version = "1.0.0"
 const Sum = 30
 const Greeting = "Hello, World"
 ```
 
-### Stdlib Integration
+---
+
+## Stdlib Integration
+
+Access stdlib functions directly without writing helpers:
+
 ```go
 //go:ahead stdlib:strings,strconv
 
@@ -86,67 +99,231 @@ const Num = //:strconv.Itoa:42
 ""
 ```
 
-## Repository Overview
+---
 
-- `go.mod`: Module `github.com/AeonDave/goahead`, Go 1.22+
-- `main.go`: CLI entry point for toolexec and standalone modes
-- `internal/`: Core logic (codegen, toolexec, function execution)
-- `examples/`: Feature examples:
-  - `base/`: Simple helper functions
-  - `config/`: Configuration injection
-  - `report/`: Multiple helpers
-  - `stdlib_e/`: Stdlib integration
-  - `variadic/`: Variadic functions (`joinAll`, `sum`, `maxOf`)
-  - `constants/`: Constants and types in helpers
-  - `expressions/`: Maps, structs, slices
-  - `types/`: Custom type definitions
-  - `directives/`: Go directives (`//go:embed`, `//go:noinline`)
-- `test/`: Tests by category:
-  - `test_helpers.go`: Shared utilities
-  - `grammar_test.go`: Placeholder syntax
-  - `arguments_test.go`: Argument parsing
-  - `expressions_test.go`: Complex expressions
-  - `imports_test.go`: Import aliases
-  - `helpers_file_test.go`: Helper features
-  - `strings_test.go`: Unicode, JSON, special strings
-  - `cgo_test.go`: CGO compatibility
-  - `directives_test.go`: Go directive preservation
-  - `platform_test.go`: Cross-platform paths
+## Hierarchical Function Resolution
 
-## Coding Standards
+GoAhead scans the **entire directory tree** and resolves functions using inheritance:
 
-- Standard library only unless documented otherwise
-- Run `gofmt`; group and sort imports
-- Return errors with `fmt.Errorf` and `%w`; no panics
-- Deterministic: identical inputs → identical outputs
-- Reusable code goes in `internal/`
+### Rules
+1. Functions resolve **bottom-up** (source file's directory → root)
+2. **Local shadows parent**: `sub/helpers.go` shadows root's `helpers.go`
+3. **Shadowing emits WARNING**: `[goahead] WARNING: Function 'X' in sub/helpers.go shadows function in helpers.go`
+4. **Duplicate in same directory = FATAL ERROR**
+5. **Siblings are isolated**: `pkg1/` cannot see `pkg2/`'s functions
+6. **No upward inheritance**: Root cannot see functions defined only in subdirectories
 
-## Implementation Notes
+### Example Structure
+```
+project/
+├── helpers.go        # version() → "1.0.0"
+├── main.go           # uses version() → gets "1.0.0"
+└── sub/
+    ├── helpers.go    # version() → "2.0.0"  (SHADOWS parent!)
+    └── main.go       # uses version() → gets "2.0.0"
+```
 
-- `internal/` packages: side-effect free at import, use constructors
-- Marker syntax: `//go:ahead ...` (file), `//:func:args` (placeholder)
-- CLI flags wired through `internal.Config`
-- Tests required for behaviour changes
+### Console Output
+```
+[goahead] Replaced in main.go: version() → "1.0.0" (from helpers.go)
+[goahead] WARNING: Function 'version' in sub/helpers.go shadows function in helpers.go
+[goahead] Replaced in sub/main.go: version() → "2.0.0" (from sub/helpers.go)
+```
 
-## Testing
+---
+
+## Function Injection
+
+Copy entire functions from helpers into source files:
+
+```go
+//:inject:FunctionName
+```
+
+GoAhead copies:
+- The function itself
+- Required imports
+- Required constants
+- Required types
+- Helper-to-helper dependencies
+
+### Use Case: Obfuscation
+```go
+// helpers.go
+const key = 0x42
+func Shadow(s string) string { /* encode */ }
+func Unshadow(s string) string { /* decode, uses key */ }
+
+// main.go
+var encoded = //:Shadow:"secret"
+""
+
+//:inject:Unshadow  // Function + key constant copied here
+
+func main() {
+    fmt.Println(Unshadow(encoded))
+}
+```
+
+---
+
+## Repository Structure
+
+```
+goahead/
+├── main.go                    # CLI entry point
+├── internal/                  # Core logic (ALL business logic here)
+│   ├── codegen.go            # Code generation orchestration
+│   ├── code_processor.go     # Placeholder replacement logic
+│   ├── file_processor.go     # File I/O and parsing
+│   ├── function_executor.go  # Helper function execution
+│   ├── toolexec_manager.go   # Toolexec mode handling
+│   ├── types.go              # Shared types and interfaces
+│   └── constants.go          # Version, patterns, etc.
+├── test/                      # ALL tests go here
+│   ├── test_helpers.go       # Shared test utilities
+│   └── *_test.go             # Test files by category
+└── examples/                  # Working examples for each feature
+```
+
+---
+
+## Testing Guidelines
+
+### Critical Rules for Writing Tests
+
+> ⚠️ **IMPORTANT**: Tests must verify the INTENDED behavior, not model themselves on existing (potentially buggy) code.
+
+1. **Test the specification, not the implementation**
+   - Read AGENTS.md to understand what the code SHOULD do
+   - Write tests that verify the specification
+   - Don't just copy what the code currently does
+
+2. **Use compile verification for generated code**
+   ```go
+   // CORRECT: Verify the generated code actually compiles
+   result := processAndReplace(...)
+   verifyCompiles(t, result) // Runs `go build` on generated code
+   
+   // WRONG: Only check that some string appears
+   if !strings.Contains(result, "something") { ... }
+   ```
+
+3. **Test positive AND negative cases**
+   ```go
+   // Test that valid input works
+   result, err := process(validInput)
+   require.NoError(t, err)
+   
+   // Test that invalid input fails appropriately
+   _, err = process(invalidInput)
+   require.Error(t, err)
+   require.Contains(t, err.Error(), "expected error message")
+   ```
+
+4. **Don't write tests just to pass**
+   - If a test is green but doesn't actually verify correctness, it's worse than no test
+   - Always ask: "If I introduced a bug, would this test catch it?"
+
+5. **Include edge cases**
+   - Empty strings, nil values, boundary conditions
+   - Unicode, special characters, escaped strings
+   - Large inputs, deeply nested structures
+
+### Test Utilities Available
+
+```go
+// test/test_helpers.go provides:
+
+// setupTestDir - Create temporary directory with test files
+dir, cleanup := setupTestDir(t, map[string]string{
+    "helpers.go": helperCode,
+    "main.go": sourceCode,
+})
+defer cleanup()
+
+// verifyCompiles - Compile generated code to verify it's valid Go
+verifyCompiles(t, generatedCode) // ALWAYS use this for generated code
+
+// processAndReplace - Run the full codegen pipeline
+result := processAndReplace(t, dir, "main.go")
+```
+
+### Running Tests
 
 ```bash
 go test ./...           # Full suite
-go test ./internal/...  # Core logic
-go test ./test/...      # Integration tests
+go test ./test/...      # Integration tests only
+go test -v ./...        # Verbose output
 go test -race ./...     # Race detection
+go test -cover ./...    # Coverage report
 ```
 
-## Pre-Submission Checks
+---
+
+## Coding Standards
+
+- **Standard library only** unless documented otherwise
+- Run `gofmt` before committing
+- Group imports: stdlib, then external, then internal
+- Return errors with `fmt.Errorf("context: %w", err)`
+- No panics except for truly unrecoverable situations
+- **Deterministic**: identical inputs → identical outputs
+- All reusable code goes in `internal/`
+
+---
+
+## Implementation Notes for AI Agents
+
+### Key Patterns
+
+1. **Config-driven**: All CLI flags flow through `internal.Config`
+2. **Side-effect free imports**: `internal/` packages do nothing at import time
+3. **Constructor pattern**: Use `New*()` functions to create instances
+4. **Error wrapping**: Always wrap errors with context using `%w`
+
+### Common Pitfalls
+
+1. **Placeholder must have literal on next line**: The comment alone does nothing
+2. **Helper files need `//go:build ignore`**: Otherwise they get compiled
+3. **Function names are case-sensitive**: `Version` ≠ `version`
+4. **Strings need quotes in placeholders**: `//:greet:"World"` not `//:greet:World`
+
+### When Modifying Code
+
+1. Read the relevant `*_test.go` files first to understand expected behavior
+2. Run existing tests before making changes
+3. Add tests for any new functionality
+4. Verify generated code compiles using `verifyCompiles()`
+5. Run full test suite after changes: `go test ./...`
+
+---
+
+## Pre-Submission Checklist
 
 ```bash
+# 1. Format code
+gofmt -w .
+
+# 2. Run static analysis
 go vet ./...
+
+# 3. Build successfully
 go build ./...
+
+# 4. All tests pass
+go test ./...
+
+# 5. No race conditions
+go test -race ./...
 ```
 
-## Pull Request Expectations
+---
 
-- Summarise behavioural changes
-- Update `README.md` for user-facing changes
-- Update this AGENTS.md for structural changes
-- Include regression tests
+## Pull Request Guidelines
+
+1. **Summarize behavioral changes** in PR description
+2. **Update README.md** for user-facing changes
+3. **Update AGENTS.md** for structural or behavioral changes
+4. **Include regression tests** for bug fixes
+5. **Verify tests compile generated code** when adding codegen tests

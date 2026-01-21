@@ -34,7 +34,7 @@ func flag() bool { return true }
 
 import (
     "fmt"
-    "strings"
+    _ "strings"
 )
 
 var (
@@ -59,6 +59,12 @@ func main() {
     fmt.Println(makeGreeting("team"))
     fmt.Println(greeting, result, circumference, ready, trimmed)
 }
+
+func makeGreeting(name string) string { return "" }
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
 `)
 
 	if err := internal.RunCodegen(dir, false); err != nil {
@@ -85,6 +91,9 @@ func main() {
 			t.Fatalf("output missing %q\n---- got ----\n%s", want, got)
 		}
 	}
+
+	// Verify generated code compiles
+	verifyCompiles(t, dir)
 }
 
 func TestRunCodegenSkipsBlankLinesAfterComment(t *testing.T) {

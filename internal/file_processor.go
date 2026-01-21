@@ -6,7 +6,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"io/fs"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,9 +97,6 @@ func (fp *FileProcessor) processFunctionDeclaration(fn *ast.FuncDecl, filePath s
 	}
 
 	funcName := fn.Name.Name
-	if fp.isDuplicateFunction(funcName, filePath) {
-		return
-	}
 
 	userFunc := &UserFunction{
 		Name:       funcName,
@@ -109,23 +105,58 @@ func (fp *FileProcessor) processFunctionDeclaration(fn *ast.FuncDecl, filePath s
 		FilePath:   filePath,
 	}
 
+	// Get directory of the helper file
+	funcDir := filepath.Dir(filePath)
+	absDir, err := filepath.Abs(funcDir)
+	if err != nil {
+		absDir = funcDir
+	}
+
+	// Initialize map for this directory if needed
+	if fp.ctx.FunctionsByDir[absDir] == nil {
+		fp.ctx.FunctionsByDir[absDir] = make(map[string]*UserFunction)
+	}
+
+	// Check for duplicate in same directory (this is an error)
+	if existingFunc, exists := fp.ctx.FunctionsByDir[absDir][funcName]; exists {
+		_, _ = fmt.Fprintf(os.Stderr, "ERROR: Duplicate function '%s' in same directory!\n"+
+			"  - First definition: %s\n"+
+			"  - Second definition: %s\n",
+			funcName, existingFunc.FilePath, filePath)
+		os.Exit(1)
+	}
+
+	// Check for shadowing (warning only)
+	fp.checkShadowing(funcName, absDir, filePath)
+
+	// Store in directory-specific map
+	fp.ctx.FunctionsByDir[absDir][funcName] = userFunc
+
+	// Also store in flat map for backward compatibility
 	fp.ctx.Functions[funcName] = userFunc
+}
+
+// checkShadowing warns if this function shadows one from a parent directory
+func (fp *FileProcessor) checkShadowing(funcName, funcDir, filePath string) {
+	// Walk up from parent directory
+	for dir := parentDir(funcDir); dir != "" && dir != funcDir; dir = parentDir(dir) {
+		if funcs, ok := fp.ctx.FunctionsByDir[dir]; ok {
+			if existingFunc, exists := funcs[funcName]; exists {
+				_, _ = fmt.Fprintf(os.Stderr, "[goahead] WARNING: Function '%s' in %s shadows function in %s\n",
+					funcName, filePath, existingFunc.FilePath)
+				return
+			}
+		}
+
+		// Stop at root
+		if dir == fp.ctx.RootDir || dir == "." {
+			break
+		}
+	}
 }
 
 func (fp *FileProcessor) isValidFunction(fn *ast.FuncDecl) bool {
 	return fn.Name.IsExported() || (fn.Name.Name[0] >= 'a' && fn.Name.Name[0] <= 'z')
-}
-
-func (fp *FileProcessor) isDuplicateFunction(funcName, filePath string) bool {
-	if existingFunc, exists := fp.ctx.Functions[funcName]; exists {
-		log.Fatalf("ERROR: Duplicate function '%s' found!\n"+
-			"  - First definition: %s\n"+
-			"  - Second definition: %s\n"+
-			"Please rename one of the functions to avoid conflicts.",
-			funcName, existingFunc.FilePath, filePath)
-		return true
-	}
-	return false
 }
 
 func (fp *FileProcessor) extractInputTypes(fn *ast.FuncDecl) []string {
@@ -413,6 +444,21 @@ func (fp *FileProcessor) ProcessDirectory(dir string, verbose bool, codeProcesso
 		}
 		if err := codeProcessor.ProcessFile(path, verbose); err != nil {
 			return fmt.Errorf("error processing file %s: %v", path, err)
+		}
+		return nil
+	})
+}
+
+func (fp *FileProcessor) ProcessDirectoryInjections(dir string, verbose bool, injector *Injector) error {
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || fp.IsFunctionFile(path) {
+			return nil
+		}
+		if err := injector.ProcessFileInjections(path, verbose); err != nil {
+			return fmt.Errorf("error processing injections in %s: %v", path, err)
 		}
 		return nil
 	})

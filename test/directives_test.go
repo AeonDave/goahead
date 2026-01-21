@@ -202,7 +202,6 @@ var (
 		dir := t.TempDir()
 		writeFile(t, dir, "helpers.go", `//go:build exclude
 //go:ahead functions
-//go:ahead import str=strings
 
 package main
 
@@ -215,9 +214,8 @@ func getMsg() string { return "hello" }
 var (
     //:getMsg
     msg = ""
-    //:str.ToUpper:"world"
+    //:strings.ToUpper:"world"
     upperWorld = ""
-)
 
 //go:noinline
 func process() string {

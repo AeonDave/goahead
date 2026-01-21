@@ -9,16 +9,17 @@ import (
 
 func TestExecuteFunctionReportsStdlibResolutionFailure(t *testing.T) {
 	ctx := &internal.ProcessorContext{
-		Functions:       make(map[string]*internal.UserFunction),
-		FuncFiles:       nil,
-		TempDir:         t.TempDir(),
-		ImportOverrides: make(map[string]string),
+		Functions:      make(map[string]*internal.UserFunction),
+		FunctionsByDir: make(map[string]map[string]*internal.UserFunction),
+		RootDir:        t.TempDir(),
+		FuncFiles:      nil,
+		TempDir:        t.TempDir(),
 	}
 	executor := internal.NewFunctionExecutor(ctx)
 
 	t.Setenv("PATH", "")
 
-	_, err := executor.ExecuteFunction("http.DetectContentType", `"data"`)
+	_, _, err := executor.ExecuteFunction("http.DetectContentType", `"data"`, ctx.RootDir)
 	if err == nil {
 		t.Fatalf("expected error when go toolchain is unavailable")
 	}

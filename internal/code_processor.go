@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -61,10 +62,16 @@ func (cp *CodeProcessor) processLines(file *os.File, filePath string, verbose bo
 	modified := false
 
 	commentPattern := regexp.MustCompile(CommentPattern)
+	injectPattern := regexp.MustCompile(InjectPattern)
 
 Outer:
 	for scanner.Scan() {
 		line := scanner.Text()
+
+		if injectPattern.MatchString(line) {
+			lines = append(lines, line)
+			continue
+		}
 
 		if commentMatch := commentPattern.FindStringSubmatch(line); commentMatch != nil {
 			funcName := strings.TrimSpace(commentMatch[1])
@@ -105,13 +112,20 @@ Outer:
 }
 
 func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath string, verbose bool) (string, bool) {
-	result, err := cp.executor.ExecuteFunction(funcName, argsStr)
+	// Get directory of the source file for hierarchical resolution
+	sourceDir := filepath.Dir(filePath)
+	absSourceDir, err := filepath.Abs(sourceDir)
+	if err != nil {
+		absSourceDir = sourceDir
+	}
+
+	result, userFunc, err := cp.executor.ExecuteFunction(funcName, argsStr, absSourceDir)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Warning: Could not execute function '%s' in %s: %v\n", funcName, filePath, err)
 		return line, false
 	}
 
-	typeHint := cp.typeHintFor(funcName, result)
+	typeHint := cp.typeHintForFunc(userFunc, result)
 	formattedResult := formatResultForReplacement(result, typeHint)
 
 	leadingWhitespace, _ := splitLeadingWhitespace(line)
@@ -124,7 +138,12 @@ func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath strin
 	}
 
 	if replaced {
-		_, _ = fmt.Fprintf(os.Stderr, "[goahead] Replaced in %s: %s(%s) -> %s\n", filePath, funcName, argsStr, result)
+		// Log which helper file the function came from
+		helperInfo := ""
+		if userFunc != nil {
+			helperInfo = fmt.Sprintf(" (from %s)", userFunc.FilePath)
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "[goahead] Replaced in %s: %s(%s) -> %s%s\n", filePath, funcName, argsStr, result, helperInfo)
 		if verbose {
 			_, _ = fmt.Fprintf(os.Stderr, "  Original: '%s'\n  New: '%s'\n", strings.TrimSpace(line), strings.TrimSpace(newLine))
 		}
@@ -175,6 +194,16 @@ func (cp *CodeProcessor) replaceInAssignment(originalLine, funcName, argsStr, fo
 
 	newLine := varAssignPart + formattedResult
 	return newLine, newLine != originalLine, nil
+}
+
+func (cp *CodeProcessor) typeHintForFunc(userFunc *UserFunction, result string) string {
+	if userFunc != nil {
+		hint := mapOutputType(userFunc.OutputType)
+		if hint != "other" {
+			return hint
+		}
+	}
+	return inferResultKind(result)
 }
 
 func (cp *CodeProcessor) typeHintFor(funcName, result string) string {
