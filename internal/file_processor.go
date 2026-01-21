@@ -182,7 +182,7 @@ func (fp *FileProcessor) extractOutputType(fn *ast.FuncDecl) string {
 	if fn.Type.Results != nil && len(fn.Type.Results.List) > 0 {
 		return typeToString(fn.Type.Results.List[0].Type)
 	}
-	return "void"
+	return ""
 }
 
 func typeToString(expr ast.Expr) string {
@@ -438,9 +438,6 @@ func (fp *FileProcessor) ProcessDirectory(dir string, verbose bool, codeProcesso
 		}
 		if d.IsDir() || !strings.HasSuffix(path, ".go") || fp.IsFunctionFile(path) {
 			return nil
-		}
-		if verbose {
-			fmt.Printf("Processing file: %s\n", path)
 		}
 		if err := codeProcessor.ProcessFile(path, verbose); err != nil {
 			return fmt.Errorf("error processing file %s: %v", path, err)

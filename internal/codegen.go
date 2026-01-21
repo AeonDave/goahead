@@ -73,7 +73,7 @@ func RunCodegen(dir string, verbose bool) error {
 		return fmt.Errorf("error processing directory: %v", err)
 	}
 	if verbose {
-		fmt.Println("Code generation completed successfully")
+		fmt.Println("[goahead] Code generation completed successfully")
 	}
 
 	return nil
@@ -90,11 +90,19 @@ func printLoadedInfo(ctx *ProcessorContext) {
 	for _, funcs := range ctx.FunctionsByDir {
 		totalFuncs += len(funcs)
 	}
-	fmt.Printf("Loaded %d user functions in %d directories:\n", totalFuncs, len(ctx.FunctionsByDir))
+	dirWord := "directories"
+	if len(ctx.FunctionsByDir) == 1 {
+		dirWord = "directory"
+	}
+	fmt.Printf("Loaded %d user functions in %d %s:\n", totalFuncs, len(ctx.FunctionsByDir), dirWord)
 	for dir, funcs := range ctx.FunctionsByDir {
 		fmt.Printf("  Directory: %s\n", dir)
 		for name, fn := range funcs {
-			fmt.Printf("    - %s(%s) %s\n", name, strings.Join(fn.InputTypes, ", "), fn.OutputType)
+			if fn.OutputType != "" {
+				fmt.Printf("    - %s(%s) %s\n", name, strings.Join(fn.InputTypes, ", "), fn.OutputType)
+			} else {
+				fmt.Printf("    - %s(%s)\n", name, strings.Join(fn.InputTypes, ", "))
+			}
 		}
 	}
 }

@@ -137,15 +137,21 @@ func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath strin
 		return line, false
 	}
 
+	// Log which helper file the function came from
+	helperInfo := ""
+	if userFunc != nil {
+		helperInfo = fmt.Sprintf(" (from %s)", userFunc.FilePath)
+	}
+
 	if replaced {
-		// Log which helper file the function came from
-		helperInfo := ""
-		if userFunc != nil {
-			helperInfo = fmt.Sprintf(" (from %s)", userFunc.FilePath)
-		}
 		_, _ = fmt.Fprintf(os.Stderr, "[goahead] Replaced in %s: %s(%s) -> %s%s\n", filePath, funcName, argsStr, result, helperInfo)
 		if verbose {
 			_, _ = fmt.Fprintf(os.Stderr, "  Original: '%s'\n  New: '%s'\n", strings.TrimSpace(line), strings.TrimSpace(newLine))
+		}
+	} else {
+		// Value already correct, log in verbose mode
+		if verbose {
+			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Unchanged in %s: %s(%s) = %s%s\n", filePath, funcName, argsStr, result, helperInfo)
 		}
 	}
 
