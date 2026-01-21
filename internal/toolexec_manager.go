@@ -51,7 +51,9 @@ func (tm *ToolexecManager) RunAsToolexec() {
 }
 
 func (tm *ToolexecManager) isCompilerTool(tool string) bool {
-	return strings.HasSuffix(tool, "compile") || strings.Contains(tool, "compile")
+	base := filepath.Base(tool)
+	// Only process the Go compiler, skip cgo, asm, link, etc.
+	return base == "compile" || base == "compile.exe"
 }
 
 func (tm *ToolexecManager) extractFilesAndOutputDir(args []string) ([]string, string) {
