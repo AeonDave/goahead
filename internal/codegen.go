@@ -6,9 +6,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func RunCodegen(dir string, verbose bool) error {
+	startTotal := time.Now()
+
 	if verbose {
 		fmt.Printf("Parsed flags:\n")
 		fmt.Printf("  dir: '%s'\n", dir)
@@ -42,9 +45,13 @@ func RunCodegen(dir string, verbose bool) error {
 	injector := NewInjector(ctx)
 
 	// Single walk: collect all .go files and categorize them
+	startWalk := time.Now()
 	allFiles, err := fileProcessor.CollectAllGoFiles(dir)
 	if err != nil {
 		return fmt.Errorf("failed to collect files: %v", err)
+	}
+	if verbose {
+		fmt.Printf("[goahead] Walk completed in %v\n", time.Since(startWalk))
 	}
 
 	if len(ctx.FuncFiles) == 0 {
@@ -54,6 +61,7 @@ func RunCodegen(dir string, verbose bool) error {
 		return nil
 	}
 
+	startLoad := time.Now()
 	if err := fileProcessor.LoadUserFunctions(); err != nil {
 		return fmt.Errorf("failed to load user functions: %v", err)
 	}
@@ -61,16 +69,20 @@ func RunCodegen(dir string, verbose bool) error {
 		return fmt.Errorf("failed to prepare executor: %v", err)
 	}
 	if verbose {
+		fmt.Printf("[goahead] Load functions completed in %v\n", time.Since(startLoad))
 		printLoadedInfo(ctx)
 	}
 
 	// Fast-check: identify which files need processing (have markers)
+	startFilter := time.Now()
 	filesToProcess := fileProcessor.FilterFilesWithMarkers(allFiles)
 	if verbose {
+		fmt.Printf("[goahead] Filter completed in %v\n", time.Since(startFilter))
 		fmt.Printf("[goahead] Found %d files with markers out of %d total .go files\n", len(filesToProcess), len(allFiles))
 	}
 
 	// Process files sequentially to avoid race conditions on caches
+	startProcess := time.Now()
 	for _, filePath := range filesToProcess {
 		// Process injections first
 		if err := injector.ProcessFileInjections(filePath, verbose); err != nil {
@@ -81,8 +93,12 @@ func RunCodegen(dir string, verbose bool) error {
 			return fmt.Errorf("error processing %s: %v", filePath, err)
 		}
 	}
+	if verbose {
+		fmt.Printf("[goahead] Process completed in %v\n", time.Since(startProcess))
+	}
 
 	if verbose {
+		fmt.Printf("[goahead] Total time: %v\n", time.Since(startTotal))
 		fmt.Println("[goahead] Code generation completed successfully")
 	}
 

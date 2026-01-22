@@ -5,19 +5,19 @@ import "fmt"
 var (
 	// Variadic string function with separator
 	//:joinAll:"-":"a":"b":"c":"d"
-	dashed = ""
+	dashed = "a-b-c-d"
 
 	// Variadic without separator
 	//:concat:"Hello":" ":"World":"!"
-	message = ""
+	message = "Hello World!"
 
 	// Variadic numbers
 	//:sum:1:2:3:4:5
-	total = 0
+	total = 15
 
 	// Find maximum
 	//:maxOf:42:17:99:8:73
-	maximum = 0
+	maximum = 99
 )
 
 func main() {

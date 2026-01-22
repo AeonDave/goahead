@@ -4,13 +4,13 @@ import "fmt"
 
 func main() {
 	//:getString
-	msg := ""
+	msg := "Hello World"
 
 	//:getInt
-	num := 0
+	num := 42
 
 	//:ShadowStr:pippo
-	secret := ""
+	secret := "4717317a03"
 
 	fmt.Printf("Message: %s\n", msg)
 	fmt.Printf("Number: %d\n", num)

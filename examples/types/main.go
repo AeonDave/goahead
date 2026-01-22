@@ -5,19 +5,19 @@ import "fmt"
 var (
 	// Custom type as return
 	//:getDefaultStatus
-	status = 0
+	status = 1
 
 	// Status name from custom type value
 	//:statusName:2
-	statusStr = ""
+	statusStr = "Completed"
 
 	// Using struct internally
 	//:getDefaultConfig
-	serverAddr = ""
+	serverAddr = "localhost:8080"
 
 	// Nested struct calculation
 	//:getRectArea
-	area = 0
+	area = 50
 )
 
 func main() {

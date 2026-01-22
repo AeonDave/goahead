@@ -469,7 +469,7 @@ func userFunc() string { return "user-value" }
 var user = ""
 
 //:strings.ToUpper:"hello"
-var upper = ""
+var upper = "HELLO"
 `)
 
 	err := internal.RunCodegen(dir, false)

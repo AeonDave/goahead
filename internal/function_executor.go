@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"go/format"
@@ -17,6 +18,7 @@ import (
 const evalFmtAlias = "goaheadfmt"
 
 var executionTemplate = template.Must(template.New("program").Parse(ExecutionTemplate))
+var executionBatchTemplate = template.Must(template.New("programBatch").Parse(ExecutionBatchTemplate))
 
 type invocationKind int
 
@@ -65,6 +67,17 @@ type FunctionExecutor struct {
 
 	stdImportMap map[string]string
 	stdListErr   error
+}
+
+type BatchCall struct {
+	FuncName string
+	ArgsStr  string
+}
+
+type BatchResult struct {
+	Result   string
+	UserFunc *UserFunction
+	Err      error
 }
 
 type preparedCode struct {
@@ -140,6 +153,107 @@ func (fe *FunctionExecutor) ExecuteFunction(funcName string, argsStr string, sou
 
 	fe.cache[key] = result
 	return result, target.userFunc, nil
+}
+
+func (fe *FunctionExecutor) ExecuteBatch(calls []BatchCall, sourceDir string) []BatchResult {
+	results := make([]BatchResult, len(calls))
+	if len(calls) == 0 {
+		return results
+	}
+
+	type pendingCall struct {
+		index    int
+		callExpr string
+		target   callTarget
+		cacheKey string
+	}
+
+	var pending []pendingCall
+	callExprs := make([]string, 0, len(calls))
+	targets := make([]callTarget, 0, len(calls))
+
+	for i, call := range calls {
+		args, err := fe.parseArguments(call.ArgsStr)
+		if err != nil {
+			results[i].Err = err
+			continue
+		}
+
+		target, err := fe.determineTarget(call.FuncName, sourceDir)
+		if err != nil {
+			results[i].Err = err
+			continue
+		}
+
+		key, err := fe.cacheKeyWithDir(target, args, sourceDir)
+		if err != nil {
+			results[i].Err = err
+			continue
+		}
+		if cached, ok := fe.cache[key]; ok {
+			results[i] = BatchResult{Result: cached, UserFunc: target.userFunc}
+			continue
+		}
+
+		formattedArgs, err := fe.formatArguments(target, args)
+		if err != nil {
+			results[i].Err = err
+			continue
+		}
+
+		callExpr := target.callExpr
+		if len(formattedArgs) > 0 {
+			callExpr = fmt.Sprintf("%s(%s)", target.callExpr, strings.Join(formattedArgs, ", "))
+		} else {
+			callExpr = fmt.Sprintf("%s()", target.callExpr)
+		}
+
+		pending = append(pending, pendingCall{
+			index:    i,
+			callExpr: callExpr,
+			target:   target,
+			cacheKey: key,
+		})
+		callExprs = append(callExprs, callExpr)
+		targets = append(targets, target)
+	}
+
+	if len(pending) == 0 {
+		return results
+	}
+
+	program, err := fe.buildProgramForDirBatch(targets, callExprs, sourceDir)
+	if err != nil {
+		for _, call := range pending {
+			results[call.index].Err = err
+		}
+		return results
+	}
+
+	output, err := fe.executeProgram(program)
+	if err != nil {
+		for _, call := range pending {
+			results[call.index].Err = err
+		}
+		return results
+	}
+
+	lines := splitOutputLines(output)
+	if len(lines) != len(pending) {
+		err := fmt.Errorf("unexpected batch output lines: expected %d got %d", len(pending), len(lines))
+		for _, call := range pending {
+			results[call.index].Err = err
+		}
+		return results
+	}
+
+	for i, call := range pending {
+		result := lines[i]
+		fe.cache[call.cacheKey] = result
+		results[call.index] = BatchResult{Result: result, UserFunc: call.target.userFunc}
+	}
+
+	return results
 }
 
 func (fe *FunctionExecutor) parseArguments(argsStr string) ([]argument, error) {
@@ -286,6 +400,56 @@ func (fe *FunctionExecutor) buildProgramForDir(target callTarget, callExpr strin
 
 	var builder strings.Builder
 	if err := executionTemplate.Execute(&builder, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %v", err)
+	}
+
+	formatted, err := format.Source([]byte(builder.String()))
+	if err != nil {
+		return "", fmt.Errorf("failed to format generated program: %v", err)
+	}
+
+	return string(formatted), nil
+}
+
+func (fe *FunctionExecutor) buildProgramForDirBatch(targets []callTarget, callExprs []string, sourceDir string) (string, error) {
+	prepared, err := fe.ensurePreparedForDir(sourceDir)
+	if err != nil {
+		return "", err
+	}
+
+	importSet := make(map[string]struct{})
+	for spec := range prepared.importSet {
+		importSet[spec] = struct{}{}
+	}
+
+	for _, target := range targets {
+		if target.packagePath != "" {
+			if spec := buildImportSpec(target.packageAlias, target.packagePath); spec != "" {
+				importSet[spec] = struct{}{}
+			}
+		}
+	}
+
+	imports := make([]string, 0, len(importSet))
+	for spec := range importSet {
+		imports = append(imports, spec)
+	}
+	sort.Strings(imports)
+
+	data := struct {
+		Imports  []string
+		UserCode string
+		Calls    []string
+		FmtAlias string
+	}{
+		Imports:  imports,
+		UserCode: strings.TrimSpace(prepared.source),
+		Calls:    callExprs,
+		FmtAlias: evalFmtAlias,
+	}
+
+	var builder strings.Builder
+	if err := executionBatchTemplate.Execute(&builder, data); err != nil {
 		return "", fmt.Errorf("failed to execute template: %v", err)
 	}
 
@@ -465,6 +629,19 @@ func (fe *FunctionExecutor) executeProgram(program string) (string, error) {
 	}
 
 	return strings.TrimSpace(string(output)), nil
+}
+
+func splitOutputLines(output string) []string {
+	if output == "" {
+		return nil
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	lines := make([]string, 0, 8)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	return lines
 }
 
 func (fe *FunctionExecutor) processFunctionFile(path string) (string, map[string]struct{}) {

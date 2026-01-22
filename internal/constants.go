@@ -38,6 +38,34 @@ func main() {
 	{{.FmtAlias}}.Printf("%#v", result)
 }
 `
+	ExecutionBatchTemplate = `package main
+
+import (
+	{{.FmtAlias}} "fmt"
+{{- range .Imports}}
+	{{.}}
+{{- end}}
+)
+
+{{- if .UserCode}}
+{{.UserCode}}
+
+{{- end}}
+func goaheadFirst[T any](v T, _ ...any) T {
+	return v
+}
+
+func main() {
+	results := []any{
+{{- range .Calls}}
+		goaheadFirst({{.}}),
+{{- end}}
+	}
+	for _, result := range results {
+		{{.FmtAlias}}.Printf("%#v\n", result)
+	}
+}
+`
 )
 
 var (

@@ -4,15 +4,15 @@ import "fmt"
 
 var (
 	//:os.Getenv:"HOME"
-	homeDir = ""
+	homeDir = "C:\\Users\\novad\\"
 
 	//:http.DetectContentType:=[]byte("plain text payload")
-	mime = ""
+	mime = "text/plain; charset=utf-8"
 )
 
 func main() {
 	//:strings.ToUpper:"detected"
-	status := ""
+	status := "DETECTED"
 
 	fmt.Printf("HOME: %s\n", homeDir)
 	fmt.Printf("MIME: %s\n", mime)

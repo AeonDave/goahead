@@ -215,7 +215,7 @@ var (
     //:getMsg
     msg = ""
     //:strings.ToUpper:"world"
-    upperWorld = ""
+    upperWorld = "WORLD"
 
 //go:noinline
 func process() string {

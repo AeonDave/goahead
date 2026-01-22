@@ -15,13 +15,13 @@ import (
 // Build-time configuration via GoAhead
 var (
 	//:getBuildMode
-	buildMode = ""
+	buildMode = "release"
 
 	//:getOptimizationLevel
-	optLevel = 0
+	optLevel = 3
 
 	//:getFeatureFlag
-	newUIEnabled = false
+	newUIEnabled = true
 )
 
 //go:embed helpers.go

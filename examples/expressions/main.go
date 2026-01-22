@@ -5,27 +5,27 @@ import "fmt"
 var (
 	// Map literal - colons inside {} are preserved
 	//:getMapLen
-	mapSize = 0
+	mapSize = 3
 
 	// Struct literal - colons inside {} are preserved
 	//:getPointSum
-	pointSum = 0
+	pointSum = 30
 
 	// Count URLs (with colons in strings)
 	//:countURLs
-	urlCount = 0
+	urlCount = 2
 
 	// Raw expression with slice literal
 	//:http.DetectContentType:=[]byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
-	pngMime = ""
+	pngMime = "image/png"
 
 	// Raw expression with nested function calls
 	//:filepath.Base:="/usr/local/bin/myapp"
-	baseName = ""
+	baseName = "myapp"
 
 	// Raw expression with base64
 	//:base64.StdEncoding.EncodeToString:=[]byte("Hello, GoAhead!")
-	encoded = ""
+	encoded = "SGVsbG8sIEdvQWhlYWQh"
 )
 
 func main() {

@@ -16,6 +16,12 @@ type CodeProcessor struct {
 	executor *FunctionExecutor
 }
 
+type placeholder struct {
+	lineIndex int
+	funcName  string
+	argsStr   string
+}
+
 var (
 	assignmentPattern      = regexp.MustCompile(`^\s*(var\s+\w+(\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*`)
 	assignmentSplitPattern = regexp.MustCompile(`^(\s*(?:var\s+\w+(?:\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*)(.*)$`)
@@ -60,6 +66,13 @@ func (cp *CodeProcessor) processLines(file *os.File, filePath string, verbose bo
 	var lines []string
 	scanner := bufio.NewScanner(file)
 	modified := false
+	var placeholders []placeholder
+
+	sourceDir := filepath.Dir(filePath)
+	absSourceDir, err := filepath.Abs(sourceDir)
+	if err != nil {
+		absSourceDir = sourceDir
+	}
 
 	commentPattern := regexp.MustCompile(CommentPattern)
 	injectPattern := regexp.MustCompile(InjectPattern)
@@ -91,11 +104,12 @@ Outer:
 					lines = append(lines, nextLine)
 					continue
 				}
-				newLine, wasModified := cp.processCodeLine(nextLine, funcName, argsStr, filePath, verbose)
-				lines = append(lines, newLine)
-				if wasModified {
-					modified = true
-				}
+				lines = append(lines, nextLine)
+				placeholders = append(placeholders, placeholder{
+					lineIndex: len(lines) - 1,
+					funcName:  funcName,
+					argsStr:   argsStr,
+				})
 				break
 			}
 			continue
@@ -106,6 +120,52 @@ Outer:
 
 	if err := scanner.Err(); err != nil {
 		return nil, false, fmt.Errorf("error reading file %s: %v", filePath, err)
+	}
+
+	if len(placeholders) == 0 {
+		return lines, modified, nil
+	}
+
+	calls := make([]BatchCall, len(placeholders))
+	for i, ph := range placeholders {
+		calls[i] = BatchCall{FuncName: ph.funcName, ArgsStr: ph.argsStr}
+	}
+	results := cp.executor.ExecuteBatch(calls, absSourceDir)
+
+	for i, ph := range placeholders {
+		result := results[i]
+		originalLine := lines[ph.lineIndex]
+		if result.Err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: Could not execute function '%s' in %s: %v\n", ph.funcName, filePath, result.Err)
+			continue
+		}
+
+		typeHint := cp.typeHintForFunc(result.UserFunc, result.Result)
+		formattedResult := formatResultForReplacement(result.Result, typeHint)
+		leadingWhitespace, _ := splitLeadingWhitespace(originalLine)
+		newLine, replaced, buildErr := cp.buildReplacementLine(originalLine, leadingWhitespace, ph.funcName, ph.argsStr, formattedResult, typeHint)
+		if buildErr != nil {
+			if errors.Is(buildErr, errNoReplacement) {
+				_, _ = fmt.Fprintf(os.Stderr, "Warning: Could not replace function call for '%s' in line: %s\n", ph.funcName, strings.TrimSpace(originalLine))
+			}
+			continue
+		}
+
+		lines[ph.lineIndex] = newLine
+		if replaced {
+			modified = true
+		}
+
+		helperInfo := ""
+		if result.UserFunc != nil {
+			helperInfo = fmt.Sprintf(" (from %s)", result.UserFunc.FilePath)
+		}
+
+		if replaced {
+			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Replaced in %s: %s(%s) -> %s%s\n", filePath, ph.funcName, ph.argsStr, result.Result, helperInfo)
+		} else if verbose {
+			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Unchanged in %s: %s(%s) = %s%s\n", filePath, ph.funcName, ph.argsStr, result.Result, helperInfo)
+		}
 	}
 
 	return lines, modified, nil

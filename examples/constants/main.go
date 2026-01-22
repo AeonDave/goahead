@@ -5,27 +5,27 @@ import "fmt"
 var (
 	// Using helper that references package constants
 	//:prefixed:"DATABASE_URL"
-	envKey = ""
+	envKey = "APP_DATABASE_URL"
 
 	// Formatted key-value
 	//:formatted:"config":"production"
-	configEntry = ""
+	configEntry = "config::production"
 
 	// Get version constant
 	//:getVersion
-	appVersion = ""
+	appVersion = "1.0.0"
 
 	// Using custom type
 	//:getDefaultLevel
-	logLevel = 0
+	logLevel = 1
 
 	// Level name from custom type
 	//:levelName:2
-	levelStr = ""
+	levelStr = "WARN"
 
 	// Package variable
 	//:getTimeout
-	timeout = 0
+	timeout = 30
 )
 
 func main() {

@@ -58,46 +58,70 @@ func main() {
 // runGoCommandWithCodegen runs codegen first, then executes go build/run/test
 func runGoCommandWithCodegen(command string, args []string) {
 	verbose := os.Getenv("GOAHEAD_VERBOSE") == "1"
+	codegenDir := "."
 
-	// Determine working directory from args or use current
-	workDir := "."
-	for i, arg := range args {
-		// Look for package path arguments (not flags)
-		if !strings.HasPrefix(arg, "-") && (strings.HasPrefix(arg, "./") || arg == "." || strings.HasSuffix(arg, "...")) {
-			// Extract directory from pattern like ./cmd/... or ./pkg
-			dir := strings.TrimSuffix(arg, "/...")
-			dir = strings.TrimSuffix(dir, "...")
-			if dir == "" || dir == "." {
-				dir = "."
+	// Parse goahead-specific flags from args
+	var goArgs []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-verbose" || arg == "--verbose" {
+			verbose = true
+			continue
+		}
+		if arg == "-dir" || arg == "--dir" {
+			if i+1 < len(args) {
+				codegenDir = args[i+1]
+				i++ // skip next arg
+				continue
 			}
-			// For patterns like ./... we want to process from current dir
-			if strings.Contains(args[i], "...") {
-				workDir = "."
-			} else {
-				workDir = dir
+		}
+		if strings.HasPrefix(arg, "-dir=") || strings.HasPrefix(arg, "--dir=") {
+			codegenDir = strings.SplitN(arg, "=", 2)[1]
+			continue
+		}
+		goArgs = append(goArgs, arg)
+	}
+
+	// If no explicit -dir, try to determine from package path
+	if codegenDir == "." {
+		for i, arg := range goArgs {
+			// Look for package path arguments (not flags)
+			if !strings.HasPrefix(arg, "-") && (strings.HasPrefix(arg, "./") || arg == "." || strings.HasSuffix(arg, "...")) {
+				// Extract directory from pattern like ./cmd/... or ./pkg
+				dir := strings.TrimSuffix(arg, "/...")
+				dir = strings.TrimSuffix(dir, "...")
+				if dir == "" || dir == "." {
+					dir = "."
+				}
+				// For patterns like ./... we want to process from current dir
+				if strings.Contains(goArgs[i], "...") {
+					codegenDir = "."
+				} else {
+					codegenDir = dir
+				}
+				break
 			}
-			break
 		}
 	}
 
 	if verbose {
-		fmt.Fprintf(os.Stderr, "[goahead] Running codegen in %s before 'go %s'\n", workDir, command)
+		fmt.Fprintf(os.Stderr, "[goahead] Running codegen in %s before 'go %s'\n", codegenDir, command)
 	}
 
 	// Run codegen first
-	if err := internal.RunCodegen(workDir, verbose); err != nil {
+	if err := internal.RunCodegen(codegenDir, verbose); err != nil {
 		log.Fatalf("[goahead] Codegen failed: %v", err)
 	}
 
 	// Now run go command WITHOUT toolexec
-	goArgs := append([]string{command}, args...)
-	cmd := exec.Command("go", goArgs...)
+	goCmd := append([]string{command}, goArgs...)
+	cmd := exec.Command("go", goCmd...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
 
 	if verbose {
-		fmt.Fprintf(os.Stderr, "[goahead] Running: go %s\n", strings.Join(goArgs, " "))
+		fmt.Fprintf(os.Stderr, "[goahead] Running: go %s\n", strings.Join(goCmd, " "))
 	}
 
 	if err := cmd.Run(); err != nil {
