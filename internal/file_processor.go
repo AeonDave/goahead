@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
+	"sync"
 )
 
 type FileProcessor struct {
@@ -21,10 +23,13 @@ func NewFileProcessor(ctx *ProcessorContext) *FileProcessor {
 	return &FileProcessor{ctx: ctx}
 }
 
-func (fp *FileProcessor) FindFunctionFiles(dir string) error {
+// CollectAllGoFiles walks the directory tree once and collects all .go files
+// It also identifies function files and stores them in ctx.FuncFiles
+func (fp *FileProcessor) CollectAllGoFiles(dir string) ([]string, error) {
+	var allFiles []string
 	fp.ctx.FuncFiles = []string{}
 
-	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -32,11 +37,89 @@ func (fp *FileProcessor) FindFunctionFiles(dir string) error {
 			return nil
 		}
 
+		// Check if it's a function file (fast check - reads only first 10 lines)
 		if fp.hasFunctionMarker(path) {
 			fp.ctx.FuncFiles = append(fp.ctx.FuncFiles, path)
+		} else {
+			allFiles = append(allFiles, path)
 		}
 		return nil
 	})
+
+	return allFiles, err
+}
+
+// FilterFilesWithMarkers quickly checks which files contain placeholder or inject markers
+// Uses parallel scanning for speed
+func (fp *FileProcessor) FilterFilesWithMarkers(files []string) []string {
+	if len(files) == 0 {
+		return nil
+	}
+
+	// Compile patterns once
+	commentRe := regexp.MustCompile(CommentPattern)
+	injectRe := regexp.MustCompile(InjectPattern)
+
+	type result struct {
+		path      string
+		hasMarker bool
+	}
+
+	results := make(chan result, len(files))
+	var wg sync.WaitGroup
+
+	// Process files in parallel
+	semaphore := make(chan struct{}, 32) // Limit concurrent file opens
+
+	for _, path := range files {
+		wg.Add(1)
+		go func(p string) {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			hasMarker := fp.fileHasMarkers(p, commentRe, injectRe)
+			results <- result{path: p, hasMarker: hasMarker}
+		}(path)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var filtered []string
+	for r := range results {
+		if r.hasMarker {
+			filtered = append(filtered, r.path)
+		}
+	}
+
+	return filtered
+}
+
+// fileHasMarkers quickly scans a file for placeholder or inject markers
+func (fp *FileProcessor) fileHasMarkers(path string, commentRe, injectRe *regexp.Regexp) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if commentRe.MatchString(line) || injectRe.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// FindFunctionFiles is kept for backward compatibility but now just wraps CollectAllGoFiles
+func (fp *FileProcessor) FindFunctionFiles(dir string) error {
+	_, err := fp.CollectAllGoFiles(dir)
+	return err
 }
 
 func (fp *FileProcessor) hasFunctionMarker(path string) bool {

@@ -41,8 +41,10 @@ func RunCodegen(dir string, verbose bool) error {
 	codeProcessor := NewCodeProcessor(ctx, executor)
 	injector := NewInjector(ctx)
 
-	if err := fileProcessor.FindFunctionFiles(dir); err != nil {
-		return fmt.Errorf("failed to find function files: %v", err)
+	// Single walk: collect all .go files and categorize them
+	allFiles, err := fileProcessor.CollectAllGoFiles(dir)
+	if err != nil {
+		return fmt.Errorf("failed to collect files: %v", err)
 	}
 
 	if len(ctx.FuncFiles) == 0 {
@@ -62,15 +64,24 @@ func RunCodegen(dir string, verbose bool) error {
 		printLoadedInfo(ctx)
 	}
 
-	// First pass: handle function injections
-	if err := fileProcessor.ProcessDirectoryInjections(dir, verbose, injector); err != nil {
-		return fmt.Errorf("error processing injections: %v", err)
+	// Fast-check: identify which files need processing (have markers)
+	filesToProcess := fileProcessor.FilterFilesWithMarkers(allFiles)
+	if verbose {
+		fmt.Printf("[goahead] Found %d files with markers out of %d total .go files\n", len(filesToProcess), len(allFiles))
 	}
 
-	// Second pass: handle value replacements
-	if err := fileProcessor.ProcessDirectory(dir, verbose, codeProcessor); err != nil {
-		return fmt.Errorf("error processing directory: %v", err)
+	// Process files sequentially to avoid race conditions on caches
+	for _, filePath := range filesToProcess {
+		// Process injections first
+		if err := injector.ProcessFileInjections(filePath, verbose); err != nil {
+			return fmt.Errorf("error processing injections in %s: %v", filePath, err)
+		}
+		// Then process placeholders
+		if err := codeProcessor.ProcessFile(filePath, verbose); err != nil {
+			return fmt.Errorf("error processing %s: %v", filePath, err)
+		}
 	}
+
 	if verbose {
 		fmt.Println("[goahead] Code generation completed successfully")
 	}
