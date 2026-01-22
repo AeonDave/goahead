@@ -1,8 +1,6 @@
 # GoAhead Agents Guide
 
-> **For AI Agents**: This document is optimized for LLM consumption. Read this FIRST before modifying any code.
-
-## TL;DR - What GoAhead Does
+## What GoAhead Does
 
 GoAhead is a **compile-time code generation tool** for Go that:
 1. Scans for placeholder comments (`//:functionName:args`)
@@ -39,12 +37,19 @@ someStatement = literalValue                  ← GoAhead replaces the first mat
 
 ## Usage Modes
 
-**Toolexec (recommended)**:
+**Subcommands (recommended, especially for CGO)**:
+```bash
+goahead build ./...      # Process + build
+goahead test ./...       # Process + test  
+goahead run ./cmd/app    # Process + run
+```
+
+**Toolexec**:
 ```bash
 go build -toolexec="goahead" ./...
 ```
 
-**Standalone**:
+**Standalone (process only)**:
 ```bash
 goahead -dir=./mypackage
 ```
@@ -104,33 +109,36 @@ const Num = //:strconv.Itoa:42
 
 ---
 
-## Hierarchical Function Resolution
+## Depth-Based Function Resolution
 
-GoAhead scans the **entire directory tree** and resolves functions using inheritance:
+GoAhead scans the **entire directory tree** and resolves functions using depth-based inheritance:
 
 ### Rules
-1. Functions resolve **bottom-up** (source file's directory → root)
-2. **Local shadows parent**: `sub/helpers.go` shadows root's `helpers.go`
-3. **Shadowing emits WARNING**: `[goahead] WARNING: Function 'X' in sub/helpers.go shadows function in helpers.go`
-4. **Duplicate in same directory = FATAL ERROR**
-5. **Siblings are isolated**: `pkg1/` cannot see `pkg2/`'s functions
+1. Functions resolve **from the source file's depth down to depth 0** (root)
+2. **Same-depth pooling**: all helper functions at the same depth are visible across siblings
+3. **Deeper shadows shallower**: deeper definitions override shallower ones
+4. **Shadowing emits WARNING** with depth information
+5. **Duplicate at the same depth = FATAL ERROR** (even across different directories)
 6. **No upward inheritance**: Root cannot see functions defined only in subdirectories
 
 ### Example Structure
 ```
 project/
-├── helpers.go        # version() → "1.0.0"
+├── helpers.go        # version() → "1.0.0" (depth 0)
 ├── main.go           # uses version() → gets "1.0.0"
-└── sub/
-    ├── helpers.go    # version() → "2.0.0"  (SHADOWS parent!)
-    └── main.go       # uses version() → gets "2.0.0"
+├── pkg1/
+│   ├── helpers.go    # version() → "2.0.0"  (depth 1, SHADOWS parent)
+│   └── main.go       # uses version() → gets "2.0.0"
+└── pkg2/
+    ├── helpers.go    # extra() → "pkg2" (depth 1, shared with pkg1)
+    └── main.go       # uses extra() → gets "pkg2"
 ```
 
 ### Console Output
 ```
 [goahead] Replaced in main.go: version() → "1.0.0" (from helpers.go)
-[goahead] WARNING: Function 'version' in sub/helpers.go shadows function in helpers.go
-[goahead] Replaced in sub/main.go: version() → "2.0.0" (from sub/helpers.go)
+[goahead] WARNING: Function 'version' at depth 1 (pkg1/helpers.go) shadows function at depth 0 (helpers.go)
+[goahead] Replaced in pkg1/main.go: version() → "2.0.0" (from pkg1/helpers.go)
 ```
 
 ---

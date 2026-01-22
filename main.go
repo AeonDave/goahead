@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -17,6 +18,16 @@ func main() {
 		toolexecManager.RunAsToolexec()
 		return
 	}
+
+	// Check for subcommands: goahead build, goahead run, goahead test
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "build", "run", "test":
+			runGoCommandWithCodegen(os.Args[1], os.Args[2:])
+			return
+		}
+	}
+
 	// If no arguments are provided, show help/usage instead of running codegen
 	if len(os.Args) == 1 {
 		showHelp()
@@ -41,6 +52,59 @@ func main() {
 
 	if err := internal.RunCodegen(config.Dir, config.Verbose); err != nil {
 		log.Fatalf("Error: %v", err)
+	}
+}
+
+// runGoCommandWithCodegen runs codegen first, then executes go build/run/test
+func runGoCommandWithCodegen(command string, args []string) {
+	verbose := os.Getenv("GOAHEAD_VERBOSE") == "1"
+
+	// Determine working directory from args or use current
+	workDir := "."
+	for i, arg := range args {
+		// Look for package path arguments (not flags)
+		if !strings.HasPrefix(arg, "-") && (strings.HasPrefix(arg, "./") || arg == "." || strings.HasSuffix(arg, "...")) {
+			// Extract directory from pattern like ./cmd/... or ./pkg
+			dir := strings.TrimSuffix(arg, "/...")
+			dir = strings.TrimSuffix(dir, "...")
+			if dir == "" || dir == "." {
+				dir = "."
+			}
+			// For patterns like ./... we want to process from current dir
+			if strings.Contains(args[i], "...") {
+				workDir = "."
+			} else {
+				workDir = dir
+			}
+			break
+		}
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[goahead] Running codegen in %s before 'go %s'\n", workDir, command)
+	}
+
+	// Run codegen first
+	if err := internal.RunCodegen(workDir, verbose); err != nil {
+		log.Fatalf("[goahead] Codegen failed: %v", err)
+	}
+
+	// Now run go command WITHOUT toolexec
+	goArgs := append([]string{command}, args...)
+	cmd := exec.Command("go", goArgs...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[goahead] Running: go %s\n", strings.Join(goArgs, " "))
+	}
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		os.Exit(1)
 	}
 }
 
@@ -169,8 +233,16 @@ INSTALL
 	go install github.com/AeonDave/goahead@latest
 
 USAGE
-	Toolexec (recommended):    go build -toolexec="goahead" ./...
-	Standalone:                goahead -dir=./mypackage
+	Subcommands (recommended for CGO):
+		goahead build ./...          Process + build
+		goahead run ./cmd/app        Process + run  
+		goahead test ./...           Process + test
+
+	Toolexec mode:
+		go build -toolexec="goahead" ./...
+
+	Standalone (process only):
+		goahead -dir=./mypackage
 
 QUICK START
 	1. Create a helper file (helpers.go):
@@ -185,7 +257,7 @@ QUICK START
 		var greeting = ""
 
 	3. Build with goahead:
-		go build -toolexec="goahead" ./...
+		goahead build ./...
 
 	Result: greeting becomes "Hello, gopher"
 
@@ -196,7 +268,7 @@ OPTIONS
 	-version       Show version
 
 ENVIRONMENT
-	GOAHEAD_VERBOSE=1    Enable verbose output in toolexec mode
+	GOAHEAD_VERBOSE=1    Enable verbose output
 
 DOCUMENTATION
 	https://github.com/AeonDave/goahead
