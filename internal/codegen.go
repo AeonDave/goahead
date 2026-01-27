@@ -66,47 +66,52 @@ func RunCodegen(dir string, verbose bool) error {
 		}
 	}
 
-	if len(ctx.FuncFiles) == 0 {
+	// Track if we have work to do in this project
+	hasLocalWork := len(ctx.FuncFiles) > 0
+
+	if !hasLocalWork {
 		if verbose {
-			log.Printf("No function files found (looking for files with '%s' marker)", FunctionMarker)
+			log.Printf("No function files found in this project (looking for files with '%s' marker)", FunctionMarker)
 		}
-		return nil
+		// Don't return - we still need to process submodules below
 	}
 
-	startLoad := time.Now()
-	if err := fileProcessor.LoadUserFunctions(); err != nil {
-		return fmt.Errorf("failed to load user functions: %v", err)
-	}
-	if err := executor.Prepare(); err != nil {
-		return fmt.Errorf("failed to prepare executor: %v", err)
-	}
-	if verbose {
-		fmt.Printf("[goahead] Load functions completed in %v\n", time.Since(startLoad))
-		printLoadedInfo(ctx)
-	}
-
-	// Fast-check: identify which files need processing (have markers)
-	startFilter := time.Now()
-	filesToProcess := fileProcessor.FilterFilesWithMarkers(allFiles)
-	if verbose {
-		fmt.Printf("[goahead] Filter completed in %v\n", time.Since(startFilter))
-		fmt.Printf("[goahead] Found %d files with markers out of %d total .go files\n", len(filesToProcess), len(allFiles))
-	}
-
-	// Process files sequentially to avoid race conditions on caches
-	startProcess := time.Now()
-	for _, filePath := range filesToProcess {
-		// Process injections first
-		if err := injector.ProcessFileInjections(filePath, verbose); err != nil {
-			return fmt.Errorf("error processing injections in %s: %v", filePath, err)
+	if hasLocalWork {
+		startLoad := time.Now()
+		if err := fileProcessor.LoadUserFunctions(); err != nil {
+			return fmt.Errorf("failed to load user functions: %v", err)
 		}
-		// Then process placeholders
-		if err := codeProcessor.ProcessFile(filePath, verbose); err != nil {
-			return fmt.Errorf("error processing %s: %v", filePath, err)
+		if err := executor.Prepare(); err != nil {
+			return fmt.Errorf("failed to prepare executor: %v", err)
 		}
-	}
-	if verbose {
-		fmt.Printf("[goahead] Process completed in %v\n", time.Since(startProcess))
+		if verbose {
+			fmt.Printf("[goahead] Load functions completed in %v\n", time.Since(startLoad))
+			printLoadedInfo(ctx)
+		}
+
+		// Fast-check: identify which files need processing (have markers)
+		startFilter := time.Now()
+		filesToProcess := fileProcessor.FilterFilesWithMarkers(allFiles)
+		if verbose {
+			fmt.Printf("[goahead] Filter completed in %v\n", time.Since(startFilter))
+			fmt.Printf("[goahead] Found %d files with markers out of %d total .go files\n", len(filesToProcess), len(allFiles))
+		}
+
+		// Process files sequentially to avoid race conditions on caches
+		startProcess := time.Now()
+		for _, filePath := range filesToProcess {
+			// Process injections first
+			if err := injector.ProcessFileInjections(filePath, verbose); err != nil {
+				return fmt.Errorf("error processing injections in %s: %v", filePath, err)
+			}
+			// Then process placeholders
+			if err := codeProcessor.ProcessFile(filePath, verbose); err != nil {
+				return fmt.Errorf("error processing %s: %v", filePath, err)
+			}
+		}
+		if verbose {
+			fmt.Printf("[goahead] Process completed in %v\n", time.Since(startProcess))
+		}
 	}
 
 	if verbose {

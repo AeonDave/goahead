@@ -353,3 +353,68 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 		t.Fatalf("Failed to write %s: %v", path, err)
 	}
 }
+
+// TestSubmoduleWithoutParentHelpers verifies that submodules are processed
+// even when the parent project has NO helper files
+func TestSubmoduleWithoutParentHelpers(t *testing.T) {
+	dir, err := os.MkdirTemp("", "goahead_no_parent_helpers_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer func(path string) {
+		_ = os.RemoveAll(path)
+	}(dir)
+
+	// Parent project has go.mod but NO helpers
+	writeTestFile(t, dir, "go.mod", "module parentproject\ngo 1.21\n")
+
+	// Parent has a main.go but no placeholders (nothing to process)
+	writeTestFile(t, dir, "main.go", `package main
+
+func main() {
+	println("parent")
+}
+`)
+
+	// Submodule HAS helpers
+	subDir := filepath.Join(dir, "submodule")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("Failed to create submodule dir: %v", err)
+	}
+	writeTestFile(t, subDir, "go.mod", "module submodule\ngo 1.21\n")
+	writeTestFile(t, subDir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+func GetVersion() string {
+	return "1.0.0"
+}
+`)
+	writeTestFile(t, subDir, "main.go", `package main
+
+//:GetVersion:
+var version = ""
+
+func main() {
+	println(version)
+}
+`)
+
+	// Run codegen from parent (which has no helpers)
+	// This MUST still process the submodule
+	if err := RunCodegen(dir, false); err != nil {
+		t.Fatalf("RunCodegen failed: %v", err)
+	}
+
+	// Verify submodule was processed
+	subContent, err := os.ReadFile(filepath.Join(subDir, "main.go"))
+	if err != nil {
+		t.Fatalf("Failed to read submodule main.go: %v", err)
+	}
+
+	// The submodule's placeholder MUST be replaced
+	if !strings.Contains(string(subContent), `version = "1.0.0"`) {
+		t.Errorf("Submodule should have been processed even though parent has no helpers.\nExpected: version = \"1.0.0\"\nGot:\n%s", string(subContent))
+	}
+}
