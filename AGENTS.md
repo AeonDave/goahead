@@ -1,375 +1,212 @@
-# GoAhead Agents Guide
+# GoAhead - Development Guide
 
-## What GoAhead Does
+Compile-time code generation for Go. Executes helper functions at build time and replaces placeholders with results.
 
-GoAhead is a **compile-time code generation tool** for Go that:
-1. Scans for placeholder comments (`//:functionName:args`)
-2. Executes helper functions defined in separate files
-3. Replaces placeholder values with function results at build time
-
-**Key insight**: The placeholder comment + the literal value on the next line form a pair. GoAhead replaces ONLY the literal value.
+**Core concept:** Placeholder comment (`//:func:args`) + literal value on next line → GoAhead replaces literal with computed result.
 
 ---
 
-## Quick Reference
-
-### Marker Syntax
-```
-//go:build exclude                            ← Helper files are excluded from normal builds
-//go:ahead functions                          ← Marks a file as a helper/function file
-
-//:functionName:arg1:arg2:...                 ← Placeholder (goes immediately ABOVE the target statement)
-// :functionName:arg1:...                     ← Also valid (space after // for formatter compatibility)
-someStatement = literalValue                  ← GoAhead replaces the first matching literal in this statement
-```
-
-> **Note**: Spaces after `//` are tolerated. Both `//:func` and `// :func` work. This prevents bugs when formatters add spaces.
-
-### Argument Types
-| Type | Syntax | Examples |
-|------|--------|----------|
-| String | `"quoted"` or `` `raw` `` | `"hello"`, `` `world` `` |
-| Int | decimal, hex, binary, octal | `42`, `0x1F`, `0b101`, `0o17` |
-| Float | decimal with optional exponent | `3.14`, `-2.5`, `1e-10` |
-| Bool | `true` or `false` | `true`, `false` |
-
----
-
-## Usage Modes
-
-**Subcommands (recommended, especially for CGO)**:
-```bash
-goahead build ./...      # Process + build
-goahead test ./...       # Process + test  
-goahead run ./cmd/app    # Process + run
-```
-
-**Toolexec**:
-```bash
-go build -toolexec="goahead" ./...
-```
-
-**Standalone (process only)**:
-```bash
-goahead -dir=./mypackage
-```
-
----
-
-## Complete Example
-
-### Helper file (`helpers.go`)
-```go
-//go:build exclude
-//go:ahead functions
-
-package helpers
-
-func version() string { return "1.0.0" }
-func add(a, b int) int { return a + b }
-func greet(name string) string { return "Hello, " + name }
-```
-
-### Source file (`main.go`)
-```go
-package main
-
-//:version:
-const Version = "placeholder"
-
-//:add:10:20
-const Sum = 0
-
-//:greet:"World"
-const Greeting = ""
-```
-
-### After processing
-```go
-const Version = "1.0.0"
-const Sum = 30
-const Greeting = "Hello, World"
-```
-
----
-
-## Stdlib Integration
-
-Access stdlib functions directly without writing helpers:
-
-```go
-//go:ahead stdlib:strings,strconv
-
-const Upper = //:strings.ToUpper:"hello"
-""
-
-const Num = //:strconv.Itoa:42
-""
-```
-
----
-
-## Depth-Based Function Resolution
-
-GoAhead scans the **entire directory tree** and resolves functions using depth-based inheritance:
-
-### Rules
-1. Functions resolve **from the source file's depth down to depth 0** (root)
-2. **Same-depth pooling**: all helper functions at the same depth are visible across siblings
-3. **Deeper shadows shallower**: deeper definitions override shallower ones
-4. **Shadowing emits WARNING** with depth information
-5. **Duplicate at the same depth = FATAL ERROR** (even across different directories)
-6. **No upward inheritance**: Root cannot see functions defined only in subdirectories
-
-### Example Structure
-```
-project/
-├── helpers.go        # version() → "1.0.0" (depth 0)
-├── main.go           # uses version() → gets "1.0.0"
-├── pkg1/
-│   ├── helpers.go    # version() → "2.0.0"  (depth 1, SHADOWS parent)
-│   └── main.go       # uses version() → gets "2.0.0"
-└── pkg2/
-    ├── helpers.go    # extra() → "pkg2" (depth 1, shared with pkg1)
-    └── main.go       # uses extra() → gets "pkg2"
-```
-
-### Console Output
-```
-[goahead] Replaced in main.go: version() → "1.0.0" (from helpers.go)
-[goahead] WARNING: Function 'version' at depth 1 (pkg1/helpers.go) shadows function at depth 0 (helpers.go)
-[goahead] Replaced in pkg1/main.go: version() → "2.0.0" (from pkg1/helpers.go)
-```
-
----
-
-## Function Injection
-
-Inject entire function implementations for interface methods.
-
-### Syntax
-
-Inject markers must appear **above an interface declaration**:
-
-```go
-//:inject:MethodName1
-//:inject:MethodName2
-type MyInterface interface {
-    MethodName1(args) returnType
-    MethodName2(args) returnType
-}
-```
-
-### Rules
-1. Markers MUST be immediately followed by an interface declaration
-2. Each method name MUST exist in that interface
-3. Implementation MUST exist in helper files
-4. GoAhead copies function + dependencies to end of file
-
-### What Gets Injected
-- The function implementation itself
-- Required imports (only those actually used - unused imports in helper files are filtered out)
-- Required constants
-- Required variables
-- Required types
-- Helper-to-helper dependencies (other helper functions called)
-
-### Behavior on Subsequent Builds
-- **Marker stays**: `//:inject:` comments are NOT removed
-- **Function is replaced**: Existing injected code is removed and re-injected from helper
-- **Updates propagate**: Change helper → next build updates injected code
-- **Generated block**: Injected code is wrapped in `// Code generated by goahead. DO NOT EDIT.`
-
-### Use Case: Obfuscation
-```go
-// helpers.go
-//go:build exclude
-//go:ahead functions
-
-package main
-
-const key = 0x42
-func Shadow(s string) string { /* encode */ }
-func Unshadow(s string) string { /* decode, uses key */ }
-
-// main.go
-//:Shadow:"secret"
-var encoded = ""
-
-//:inject:Unshadow
-type Decoder interface {
-    Unshadow(s string) string
-}
-
-func main() {
-    fmt.Println(Unshadow(encoded))
-}
-```
-
-### Error Conditions
-- **Method not in interface**: FATAL ERROR
-- **Markers not followed by interface**: FATAL ERROR
-- **Implementation not found**: FATAL ERROR
-
----
-
-## Repository Structure
+## Project Structure
 
 ```
 goahead/
 ├── main.go                    # CLI entry point
-├── internal/                  # Core logic (ALL business logic here)
-│   ├── codegen.go            # Code generation orchestration
-│   ├── code_processor.go     # Placeholder replacement logic
-│   ├── file_processor.go     # File I/O and parsing
-│   ├── function_executor.go  # Helper function execution
-│   ├── toolexec_manager.go   # Toolexec mode handling
-│   ├── types.go              # Shared types and interfaces
-│   └── constants.go          # Version, patterns, etc.
-├── test/                      # ALL tests go here
-│   ├── test_helpers.go       # Shared test utilities
-│   └── *_test.go             # Test files by category
-└── examples/                  # Working examples for each feature
+├── internal/                  # All business logic
+│   ├── codegen.go            # Orchestration
+│   ├── code_processor.go     # Placeholder replacement
+│   ├── file_processor.go     # File I/O, parsing
+│   ├── function_executor.go  # Helper execution, depth resolution
+│   ├── injector.go           # Function injection
+│   ├── toolexec_manager.go   # Toolexec mode
+│   ├── types.go              # Core types: ProcessorContext, UserFunction, Config
+│   └── constants.go          # Version, patterns
+├── test/                      # All tests
+│   ├── test_helpers.go       # setupTestDir, verifyCompiles, processAndReplace
+│   └── *_test.go             # Tests by feature
+└── examples/                  # Feature examples
 ```
 
 ---
 
-## Testing Guidelines
+## Execution Flow
 
-### Critical Rules for Writing Tests
+1. **Scan** - `file_processor.CollectAllGoFiles()` walks tree, categorizes files
+2. **Load** - `file_processor.LoadUserFunctions()` parses helpers, registers in `ProcessorContext.FunctionsByDepth`
+3. **Prepare** - `function_executor.ensurePreparedForDir()` builds executable code for each source directory using depth resolution
+4. **Process** - `code_processor.ProcessFile()` finds placeholders, calls helpers, replaces literals
+5. **Inject** - `injector.ProcessFileInjections()` copies functions from helpers to source
 
-> ⚠️ **IMPORTANT**: Tests must verify the INTENDED behavior, not model themselves on existing (potentially buggy) code.
+---
 
-1. **Test the specification, not the implementation**
-   - Read AGENTS.md to understand what the code SHOULD do
-   - Write tests that verify the specification
-   - Don't just copy what the code currently does
+## Key Mechanisms
 
-2. **Use compile verification for generated code**
-   ```go
-   // CORRECT: Verify the generated code actually compiles
-   result := processAndReplace(...)
-   verifyCompiles(t, result) // Runs `go build` on generated code
-   
-   // WRONG: Only check that some string appears
-   if !strings.Contains(result, "something") { ... }
-   ```
+### Depth-Based Resolution
 
-3. **Test positive AND negative cases**
-   ```go
-   // Test that valid input works
-   result, err := process(validInput)
-   require.NoError(t, err)
-   
-   // Test that invalid input fails appropriately
-   _, err = process(invalidInput)
-   require.Error(t, err)
-   require.Contains(t, err.Error(), "expected error message")
-   ```
+**Purpose:** Allow different implementations of same symbol at different tree depths without conflicts.
 
-4. **Don't write tests just to pass**
-   - If a test is green but doesn't actually verify correctness, it's worse than no test
-   - Always ask: "If I introduced a bug, would this test catch it?"
+**Algorithm:**
+```
+sourceDepth = calculateDepth(sourceFile)
+for depth = sourceDepth down to 0:
+    if symbol exists at depth:
+        return symbol
+```
 
-5. **Include edge cases**
-   - Empty strings, nil values, boundary conditions
-   - Unicode, special characters, escaped strings
-   - Large inputs, deeply nested structures
+**Rules:**
+- **Only exported symbols** (uppercase) are tracked/available for placeholders
+- Same-depth symbols pool and share (siblings see each other)
+- Deeper shadows shallower (child overrides parent)
+- Duplicate at same depth = FATAL
+- No upward inheritance (root can't see child-only symbols)
 
-### Test Utilities Available
+**Implementation:** `internal/function_executor.go`:
+- `collectVisibleHelperFiles()` - gathers helpers from source depth to 0
+- `filterShadowedDeclarations()` - removes shadowed funcs/vars/consts/types
+- `processFunctionFileWithNames()` - extracts all **exported** identifiers using `token.IsExported()`
 
+**Critical:** 
+- Variables, constants, and types follow same shadowing as functions
+- Unexported symbols (lowercase) are ignored for placeholder/shadowing but still executable within helpers
+- This prevents "redeclared" errors and aligns with Go export conventions
+
+### Submodule Isolation
+
+**Purpose:** Directories with their own `go.mod` are independent projects - they don't inherit parent helpers and are processed as separate trees.
+
+**Detection:** During `CollectAllGoFiles()`, if a subdirectory contains `go.mod`, it's:
+1. Added to `ctx.Submodules`
+2. Skipped with `filepath.SkipDir` (not processed as part of parent)
+
+**Processing:** After main project completes, `RunCodegen()` recursively processes each submodule:
 ```go
-// test/test_helpers.go provides:
+for _, submodule := range ctx.Submodules {
+    RunCodegen(submodule, verbose)  // Fresh context, isolated tree
+}
+```
 
-// setupTestDir - Create temporary directory with test files
-dir, cleanup := setupTestDir(t, map[string]string{
-    "helpers.go": helperCode,
-    "main.go": sourceCode,
-})
-defer cleanup()
+**Behavior:**
+- Submodule helpers are **NOT visible** to parent project
+- Parent helpers are **NOT visible** to submodule
+- Each submodule has its own depth-based resolution tree starting at depth 0
+- Works recursively (submodules can contain submodules)
+- Single `goahead` invocation processes entire workspace including all nested submodules
 
-// verifyCompiles - Compile generated code to verify it's valid Go
-verifyCompiles(t, generatedCode) // ALWAYS use this for generated code
+**Use case:** Monorepos with multiple Go modules that need independent code generation.
 
-// processAndReplace - Run the full codegen pipeline
+---
+
+### Function Injection
+
+**Purpose:** Copy runtime functions from helpers to source (e.g., obfuscation: encode at build time, decode at runtime).
+
+**Markers:**
+```go
+//:inject:MethodName
+type Interface interface {
+    MethodName(args) returnType
+}
+```
+
+**Behavior:**
+- Validates method exists in interface
+- Removes existing injected code
+- Copies function + dependencies from helper
+- Preserves marker (repeatable on subsequent builds)
+
+**Implementation:** `internal/injector.go`
+
+---
+
+## Testing Philosophy
+
+**Critical:** Tests verify the SPECIFICATION, not the implementation.
+
+**Wrong approach:**
+```go
+// Bad: models current buggy behavior
+result := process(input)
+if strings.Contains(result, "something") { ... } // Just checks output
+```
+
+**Correct approach:**
+```go
+// Good: verifies specification
 result := processAndReplace(t, dir, "main.go")
+verifyCompiles(t, result)  // Compiles = valid Go
+if !strings.Contains(result, `expected = "value"`) {
+    t.Errorf("Should replace placeholder with value")
+}
 ```
 
-### Running Tests
+**Must test:**
+- Positive cases (valid inputs work)
+- Negative cases (invalid inputs fail with correct error)
+- Edge cases (empty, nil, boundary, Unicode)
+- Generated code compiles (`verifyCompiles`)
 
-```bash
-go test ./...           # Full suite
-go test ./test/...      # Integration tests only
-go test -v ./...        # Verbose output
-go test -race ./...     # Race detection
-go test -cover ./...    # Coverage report
-```
+**Test utilities** (`test/test_helpers.go`):
+- `setupTestDir(t, files)` - temp dir with test files
+- `verifyCompiles(t, code)` - compile check
+- `processAndReplace(t, dir, file)` - full pipeline
 
 ---
 
 ## Coding Standards
 
-- **Standard library only** unless documented otherwise
-- Run `gofmt` before committing
-- Group imports: stdlib, then external, then internal
-- Return errors with `fmt.Errorf("context: %w", err)`
-- No panics except for truly unrecoverable situations
-- **Deterministic**: identical inputs → identical outputs
-- All reusable code goes in `internal/`
+**Stdlib only** - no external dependencies
+**Deterministic** - same input = same output always
+**Error wrapping** - `fmt.Errorf("context: %w", err)`
+**No panics** - return errors (except truly unrecoverable)
+**Config-driven** - CLI flags → `internal.Config`
 
 ---
 
-## Implementation Notes for AI Agents
+## Common Pitfalls
 
-### Key Patterns
-
-1. **Config-driven**: All CLI flags flow through `internal.Config`
-2. **Side-effect free imports**: `internal/` packages do nothing at import time
-3. **Constructor pattern**: Use `New*()` functions to create instances
-4. **Error wrapping**: Always wrap errors with context using `%w`
-
-### Common Pitfalls
-
-1. **Placeholder must have literal on next line**: The comment alone does nothing
-2. **Helper files need `//go:build ignore`**: Otherwise they get compiled
-3. **Function names are case-sensitive**: `Version` ≠ `version`
-4. **Strings need quotes in placeholders**: `//:greet:"World"` not `//:greet:World`
-
-### When Modifying Code
-
-1. Read the relevant `*_test.go` files first to understand expected behavior
-2. Run existing tests before making changes
-3. Add tests for any new functionality
-4. Verify generated code compiles using `verifyCompiles()`
-5. Run full test suite after changes: `go test ./...`
+1. **Placeholder needs literal on next line** - comment alone does nothing
+2. **Helper files need TWO tags** - `//go:build exclude` AND `//go:ahead functions`
+3. **Case-sensitive** - `Version` ≠ `version`
+4. **Strings need quotes** - `//:greet:"World"` not `//:greet:World`
+5. **Toolexec + CGO = race condition** - use subcommands for CGO
 
 ---
 
-## Pre-Submission Checklist
+## Development Workflow
 
+**Before changes:**
 ```bash
-# 1. Format code
-gofmt -w .
-
-# 2. Run static analysis
-go vet ./...
-
-# 3. Build successfully
-go build ./...
-
-# 4. All tests pass
-go test ./...
-
-# 5. No race conditions
-go test -race ./...
+go test ./...         # Verify tests pass
 ```
 
+**After changes:**
+```bash
+gofmt -w .           # Format
+go vet ./...         # Static analysis
+go build ./...       # Build check
+go test ./...        # All tests
+go test -race ./...  # Race detection
+```
+
+**Adding features:**
+1. Read relevant tests to understand expected behavior
+2. Add tests for new functionality FIRST
+3. Implement feature
+4. Verify generated code compiles (`verifyCompiles`)
+5. Run full test suite
+
+**Fixing bugs:**
+1. Add failing test demonstrating bug
+2. Fix bug
+3. Verify test passes
+4. Run full suite
+
 ---
 
-## Pull Request Guidelines
+## PR Requirements
 
-1. **Summarize behavioral changes** in PR description
-2. **Update README.md** for user-facing changes
-3. **Update AGENTS.md** for structural or behavioral changes
-4. **Include regression tests** for bug fixes
-5. **Verify tests compile generated code** when adding codegen tests
+1. All tests pass (`go test ./...`)
+2. No race conditions (`go test -race ./...`)
+3. Update README.md for user-facing changes
+4. Update AGENTS.md for structural/flow changes
+5. Include tests for new features
+6. Include regression tests for bug fixes

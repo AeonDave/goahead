@@ -31,6 +31,9 @@ type ProcessorContext struct {
 	// Verbose enables detailed logging
 	Verbose bool
 
+	// Submodules contains paths to directories with their own go.mod (treated as separate projects)
+	Submodules []string
+
 	FileSet     *token.FileSet
 	CurrentFile string
 	FuncFiles   []string
@@ -60,16 +63,12 @@ func (ctx *ProcessorContext) CalculateDepth(dir string) int {
 		return 0
 	}
 
-	// Count separators
-	depth := 0
+	// Count separators + 1 for the final component
+	depth := 1
 	for _, c := range rel {
 		if c == filepath.Separator || c == '/' || c == '\\' {
 			depth++
 		}
-	}
-	// Add 1 for the final component
-	if rel != "" && rel != "." {
-		depth++
 	}
 	return depth
 }
@@ -126,12 +125,16 @@ func (ctx *ProcessorContext) FormatDepthInfo() string {
 			sort.Strings(names)
 			for _, name := range names {
 				fn := funcs[name]
+				relPath, _ := filepath.Rel(ctx.RootDir, fn.FilePath)
+				if relPath == "" {
+					relPath = fn.FilePath
+				}
 				if fn.OutputType != "" {
 					sb.WriteString(fmt.Sprintf("    - %s(%s) %s [%s]\n",
-						name, strings.Join(fn.InputTypes, ", "), fn.OutputType, fn.FilePath))
+						name, strings.Join(fn.InputTypes, ", "), fn.OutputType, relPath))
 				} else {
 					sb.WriteString(fmt.Sprintf("    - %s(%s) [%s]\n",
-						name, strings.Join(fn.InputTypes, ", "), fn.FilePath))
+						name, strings.Join(fn.InputTypes, ", "), relPath))
 				}
 			}
 		}

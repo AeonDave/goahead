@@ -18,12 +18,12 @@ func TestArgumentParsingCornerCases(t *testing.T) {
 
 package main
 
-func echo(s string) string { return s }
+func Echo(s string) string { return s }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:echo:"hello \"world\""
+    //:Echo:"hello \"world\""
     val = ""
 )
 
@@ -47,9 +47,9 @@ func main() {}
 
 package main
 
-func echo(s string) string { return s }
+func Echo(s string) string { return s }
 `)
-		writeFile(t, dir, "main.go", "package main\n\nvar (\n    //:echo:`raw string`\n    val = \"\"\n)\n\nfunc main() {}\n")
+		writeFile(t, dir, "main.go", "package main\n\nvar (\n    //:Echo:`raw string`\n    val = \"\"\n)\n\nfunc main() {}\n")
 		err := internal.RunCodegen(dir, false)
 		if err != nil {
 			t.Fatalf("RunCodegen failed: %v", err)
@@ -63,7 +63,7 @@ func echo(s string) string { return s }
 
 package main
 
-func echo(s string) string { 
+func Echo(s string) string { 
     if s == "" {
         return "empty"
     }
@@ -73,7 +73,7 @@ func echo(s string) string {
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:echo:""
+    //:Echo:""
     val = ""
 )
 
@@ -96,12 +96,12 @@ func main() {}
 
 package main
 
-func addOne(n int) int { return n + 1 }
+func AddOne(n int) int { return n + 1 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:addOne:0xFF
+    //:AddOne:0xFF
     val = 0
 )
 
@@ -125,12 +125,12 @@ func main() {}
 
 package main
 
-func double(n int) int { return n * 2 }
+func Double(n int) int { return n * 2 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:double:0o10
+    //:Double:0o10
     val = 0
 )
 
@@ -154,12 +154,12 @@ func main() {}
 
 package main
 
-func identity(n int) int { return n }
+func Identity(n int) int { return n }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:identity:0b1010
+    //:Identity:0b1010
     val = 0
 )
 
@@ -183,12 +183,12 @@ func main() {}
 
 package main
 
-func negate(f float64) float64 { return -f }
+func Negate(f float64) float64 { return -f }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:negate:-3.14
+    //:Negate:-3.14
     val = 0.0
 )
 
@@ -212,12 +212,12 @@ func main() {}
 
 package main
 
-func identity(f float64) float64 { return f }
+func Identity(f float64) float64 { return f }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:identity:1.5e10
+    //:Identity:1.5e10
     val = 0.0
 )
 
@@ -236,14 +236,14 @@ func main() {}
 
 package main
 
-func negate(b bool) bool { return !b }
+func Negate(b bool) bool { return !b }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:negate:true
+    //:Negate:true
     a = false
-    //:negate:false
+    //:Negate:false
     b = false
 )
 
@@ -267,13 +267,13 @@ func main() {}
 
 package main
 
-func addOne(n int) int { return n + 1 }
+func AddOne(n int) int { return n + 1 }
 `)
 		// Note: "// :" with space - common after gofmt
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    // :addOne:10
+    // :AddOne:10
     val = 0
 )
 
@@ -296,13 +296,13 @@ func main() {}
 
 package main
 
-func double(n int) int { return n * 2 }
+func Double(n int) int { return n * 2 }
 `)
 		// Multiple spaces after //
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //  :double:5
+    //  :Double:5
     val = 0
 )
 

@@ -156,15 +156,18 @@ Outer:
 			modified = true
 		}
 
-		helperInfo := ""
-		if result.UserFunc != nil {
-			helperInfo = fmt.Sprintf(" (from %s)", result.UserFunc.FilePath)
-		}
-
 		if replaced {
+			helperInfo := ""
+			if result.UserFunc != nil {
+				relPath, _ := filepath.Rel(cp.ctx.RootDir, result.UserFunc.FilePath)
+				if relPath == "" {
+					relPath = result.UserFunc.FilePath
+				}
+				helperInfo = fmt.Sprintf(" (from %s, depth %d)", relPath, result.UserFunc.Depth)
+			}
 			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Replaced in %s: %s(%s) -> %s%s\n", filePath, ph.funcName, ph.argsStr, result.Result, helperInfo)
 		} else if verbose {
-			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Unchanged in %s: %s(%s) = %s%s\n", filePath, ph.funcName, ph.argsStr, result.Result, helperInfo)
+			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Unchanged in %s: %s(%s) = %s\n", filePath, ph.funcName, ph.argsStr, result.Result)
 		}
 	}
 
@@ -197,22 +200,21 @@ func (cp *CodeProcessor) processCodeLine(line, funcName, argsStr, filePath strin
 		return line, false
 	}
 
-	// Log which helper file the function came from
-	helperInfo := ""
-	if userFunc != nil {
-		helperInfo = fmt.Sprintf(" (from %s)", userFunc.FilePath)
-	}
-
 	if replaced {
+		helperInfo := ""
+		if userFunc != nil {
+			relPath, _ := filepath.Rel(cp.ctx.RootDir, userFunc.FilePath)
+			if relPath == "" {
+				relPath = userFunc.FilePath
+			}
+			helperInfo = fmt.Sprintf(" (from %s, depth %d)", relPath, userFunc.Depth)
+		}
 		_, _ = fmt.Fprintf(os.Stderr, "[goahead] Replaced in %s: %s(%s) -> %s%s\n", filePath, funcName, argsStr, result, helperInfo)
 		if verbose {
 			_, _ = fmt.Fprintf(os.Stderr, "  Original: '%s'\n  New: '%s'\n", strings.TrimSpace(line), strings.TrimSpace(newLine))
 		}
-	} else {
-		// Value already correct, log in verbose mode
-		if verbose {
-			_, _ = fmt.Fprintf(os.Stderr, "[goahead] Unchanged in %s: %s(%s) = %s%s\n", filePath, funcName, argsStr, result, helperInfo)
-		}
+	} else if verbose {
+		_, _ = fmt.Fprintf(os.Stderr, "[goahead] Unchanged in %s: %s(%s) = %s\n", filePath, funcName, argsStr, result)
 	}
 
 	return newLine, replaced

@@ -18,7 +18,7 @@ func TestCgoCornerCases(t *testing.T) {
 
 package main
 
-func getVersion() string { return "1.0.0" }
+func GetVersion() string { return "1.0.0" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
@@ -31,7 +31,7 @@ import "C"
 import "fmt"
 
 var (
-    //:getVersion
+    //:GetVersion
     version = ""
 )
 
@@ -63,7 +63,7 @@ func main() {
 
 package main
 
-func getLibPath() string { return "/usr/local/lib" }
+func GetLibPath() string { return "/usr/local/lib" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
@@ -77,7 +77,7 @@ import "C"
 import "fmt"
 
 var (
-    //:getLibPath
+    //:GetLibPath
     libPath = ""
 )
 
@@ -108,7 +108,7 @@ func main() {
 
 package main
 
-func getCConfig() string { return "debug" }
+func GetCConfig() string { return "debug" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
@@ -123,7 +123,7 @@ static void helper() {
 import "C"
 
 var (
-    //:getCConfig
+    //:GetCConfig
     config = ""
 )
 

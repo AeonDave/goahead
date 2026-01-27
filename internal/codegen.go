@@ -45,6 +45,7 @@ func RunCodegen(dir string, verbose bool) error {
 	injector := NewInjector(ctx)
 
 	// Single walk: collect all .go files and categorize them
+	// This also detects and records submodules (directories with their own go.mod)
 	startWalk := time.Now()
 	allFiles, err := fileProcessor.CollectAllGoFiles(dir)
 	if err != nil {
@@ -52,6 +53,17 @@ func RunCodegen(dir string, verbose bool) error {
 	}
 	if verbose {
 		fmt.Printf("[goahead] Walk completed in %v\n", time.Since(startWalk))
+	}
+	if len(ctx.Submodules) > 0 {
+		// Always show submodules found (important info)
+		fmt.Printf("[goahead] Found %d submodule(s) to process separately:\n", len(ctx.Submodules))
+		for _, sub := range ctx.Submodules {
+			relPath, _ := filepath.Rel(dir, sub)
+			if relPath == "" {
+				relPath = sub
+			}
+			fmt.Printf("  - %s\n", relPath)
+		}
 	}
 
 	if len(ctx.FuncFiles) == 0 {
@@ -102,13 +114,31 @@ func RunCodegen(dir string, verbose bool) error {
 		fmt.Println("[goahead] Code generation completed successfully")
 	}
 
+	// Process submodules recursively (each submodule is treated as an independent project)
+	// This happens AFTER the main project is done, so submodules are completely isolated
+	submodules := ctx.Submodules // Copy before ctx is garbage collected
+	for _, submodule := range submodules {
+		relPath, _ := filepath.Rel(dir, submodule)
+		if relPath == "" {
+			relPath = submodule
+		}
+		fmt.Printf("\n[goahead] Processing submodule: %s\n", relPath)
+		if err := RunCodegen(submodule, verbose); err != nil {
+			return fmt.Errorf("error processing submodule %s: %v", submodule, err)
+		}
+	}
+
 	return nil
 }
 
 func printLoadedInfo(ctx *ProcessorContext) {
-	fmt.Printf("Found %d function files:\n", len(ctx.FuncFiles))
+	fmt.Printf("Found %d function file(s):\n", len(ctx.FuncFiles))
 	for _, file := range ctx.FuncFiles {
-		fmt.Printf("  - %s\n", file)
+		relPath, _ := filepath.Rel(ctx.RootDir, file)
+		if relPath == "" {
+			relPath = file
+		}
+		fmt.Printf("  - %s\n", relPath)
 	}
 
 	// Show functions organized by depth
@@ -121,6 +151,6 @@ func printLoadedInfo(ctx *ProcessorContext) {
 	if maxDepth == 0 {
 		depthWord = "depth level"
 	}
-	fmt.Printf("Loaded %d user functions across %d %s:\n", totalFuncs, maxDepth+1, depthWord)
+	fmt.Printf("Loaded %d exported function(s) across %d %s:\n", totalFuncs, maxDepth+1, depthWord)
 	fmt.Print(ctx.FormatDepthInfo())
 }

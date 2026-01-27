@@ -24,7 +24,7 @@ import (
     "strings"
 )
 
-func hashString(s string) string {
+func HashString(s string) string {
     h := sha256.Sum256([]byte(strings.TrimSpace(s)))
     return hex.EncodeToString(h[:])
 }
@@ -32,7 +32,7 @@ func hashString(s string) string {
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:hashString:"hello"
+    //:HashString:"hello"
     hash = ""
 )
 
@@ -56,14 +56,14 @@ func main() {}
 
 package main
 
-func helper1() string { return helper2() + helper3() }
-func helper2() string { return "hello" }
-func helper3() string { return "world" }
+func Helper1() string { return Helper2() + Helper3() }
+func Helper2() string { return "hello" }
+func Helper3() string { return "world" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:helper1
+    //:Helper1
     combined = ""
 )
 
@@ -88,12 +88,12 @@ package main
 
 type MyInt int
 
-func getMyInt() MyInt { return 42 }
+func GetMyInt() MyInt { return 42 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getMyInt
+    //:GetMyInt
     val = 0
 )
 
@@ -116,14 +116,14 @@ func main() {}
 
 package main
 
-const prefix = "PREFIX_"
+const Prefix = "PREFIX_"
 
-func prefixed(s string) string { return prefix + s }
+func Prefixed(s string) string { return Prefix + s }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:prefixed:"value"
+    //:Prefixed:"value"
     val = ""
 )
 
@@ -148,14 +148,14 @@ package main
 
 import "strings"
 
-func joinAll(sep string, parts ...string) string {
+func JoinAll(sep string, parts ...string) string {
     return strings.Join(parts, sep)
 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:joinAll:"-":"a":"b":"c"
+    //:JoinAll:"-":"a":"b":"c"
     joined = ""
 )
 
@@ -183,12 +183,12 @@ func main() {}
 
 package main
 
-func getValue() string { return "value" }
+func GetValue() string { return "value" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getValue
+    //:GetValue
     val = ""
 )
 

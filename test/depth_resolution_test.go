@@ -14,7 +14,7 @@ func TestDepthBasedResolution(t *testing.T) {
 	t.Run("SiblingDirectoriesShareFunctions", func(t *testing.T) {
 		// Structure:
 		// root/
-		// ├── helpers.go      # rootFunc() @ depth 0
+		// ├── helpers.go      # RootFunc() @ depth 0
 		// ├── obfuscation/    # depth 1
 		// │   └── helpers.go  # Shadow() @ depth 1
 		// └── evasion/        # depth 1
@@ -26,7 +26,7 @@ func TestDepthBasedResolution(t *testing.T) {
 		writeFile(t, dir, "helpers.go", `//go:build exclude
 //go:ahead functions
 package helpers
-func rootFunc() string { return "root" }
+func RootFunc() string { return "root" }
 `)
 		writeFile(t, dir, "obfuscation/helpers.go", `//go:build exclude
 //go:ahead functions
@@ -42,7 +42,7 @@ var encoded = ""
 //:HashStr:"password"
 var hashed = ""
 
-//:rootFunc:
+//:RootFunc:
 var root = ""
 
 func main() {}
@@ -65,9 +65,9 @@ func main() {}
 			t.Errorf("Should find HashStr() from sibling directory at depth 1\n%s", result)
 		}
 
-		// Should find rootFunc() from root (depth 0)
+		// Should find RootFunc() from root (depth 0)
 		if !strings.Contains(string(result), `root = "root"`) {
-			t.Errorf("Should find rootFunc() from root at depth 0\n%s", result)
+			t.Errorf("Should find RootFunc() from root at depth 0\n%s", result)
 		}
 	})
 
@@ -86,19 +86,19 @@ func main() {}
 		writeFile(t, dir, "helpers.go", `//go:build exclude
 //go:ahead functions
 package helpers
-func depth0Func() string { return "depth0" }
+func Depth0Func() string { return "depth0" }
 `)
 		writeFile(t, dir, "level1/helpers.go", `//go:build exclude
 //go:ahead functions
 package level1
-func depth1Func() string { return "depth1" }
+func Depth1Func() string { return "depth1" }
 `)
 		writeFile(t, dir, "level1/level2/level3/main.go", `package main
 
-//:depth0Func:
+//:Depth0Func:
 var v0 = ""
 
-//:depth1Func:
+//:Depth1Func:
 var v1 = ""
 
 func main() {}
@@ -133,23 +133,23 @@ func main() {}
 		writeFile(t, dir, "helpers.go", `//go:build exclude
 //go:ahead functions
 package helpers
-func version() string { return "1.0" }
+func Version() string { return "1.0" }
 `)
 		writeFile(t, dir, "pkg/helpers.go", `//go:build exclude
 //go:ahead functions
 package pkg
-func version() string { return "2.0" }
+func Version() string { return "2.0" }
 `)
 		writeFile(t, dir, "pkg/main.go", `package main
 
-//:version:
+//:Version:
 var v = ""
 
 func main() {}
 `)
 		writeFile(t, dir, "root_main.go", `package main
 
-//:version:
+//:Version:
 var rootV = ""
 
 func main() {}
@@ -186,27 +186,27 @@ func main() {}
 		writeFile(t, dir, "pkg1/helpers.go", `//go:build exclude
 //go:ahead functions
 package pkg1
-func func1() string { return "from-pkg1" }
+func Func1() string { return "from-pkg1" }
 `)
 		writeFile(t, dir, "pkg2/helpers.go", `//go:build exclude
 //go:ahead functions
 package pkg2
-func func2() string { return "from-pkg2" }
+func Func2() string { return "from-pkg2" }
 `)
 		writeFile(t, dir, "pkg3/helpers.go", `//go:build exclude
 //go:ahead functions
 package pkg3
-func func3() string { return "from-pkg3" }
+func Func3() string { return "from-pkg3" }
 `)
 		writeFile(t, dir, "user/main.go", `package main
 
-//:func1:
+//:Func1:
 var v1 = ""
 
-//:func2:
+//:Func2:
 var v2 = ""
 
-//:func3:
+//:Func3:
 var v3 = ""
 
 func main() {}
@@ -220,13 +220,13 @@ func main() {}
 		result, _ := os.ReadFile(filepath.Join(dir, "user/main.go"))
 
 		if !strings.Contains(string(result), `v1 = "from-pkg1"`) {
-			t.Errorf("Should find func1() from pkg1/ at depth 1\n%s", result)
+			t.Errorf("Should find Func1() from pkg1/ at depth 1\n%s", result)
 		}
 		if !strings.Contains(string(result), `v2 = "from-pkg2"`) {
-			t.Errorf("Should find func2() from pkg2/ at depth 1\n%s", result)
+			t.Errorf("Should find Func2() from pkg2/ at depth 1\n%s", result)
 		}
 		if !strings.Contains(string(result), `v3 = "from-pkg3"`) {
-			t.Errorf("Should find func3() from pkg3/ at depth 1\n%s", result)
+			t.Errorf("Should find Func3() from pkg3/ at depth 1\n%s", result)
 		}
 	})
 }
@@ -270,20 +270,20 @@ func TestDuplicateAtSameDepthError(t *testing.T) {
 	writeFile(t, dir, "pkg1/helpers.go", `//go:build exclude
 //go:ahead functions
 package pkg1
-func duplicate() string { return "from-pkg1" }
+func Duplicate() string { return "from-pkg1" }
 `)
 	writeFile(t, dir, "pkg2/helpers.go", `//go:build exclude
 //go:ahead functions
 package pkg2
-func duplicate() string { return "from-pkg2" }
+func Duplicate() string { return "from-pkg2" }
 `)
 
-	// This should fail because duplicate() is defined twice at depth 1
+	// This should fail because Duplicate() is defined twice at depth 1
 	// We capture this by checking if the warning/error is produced
 	// In a real scenario, this would call os.Exit(1)
 
 	// For now, we just document the expected behavior
-	t.Log("Expected: ERROR: Duplicate function 'duplicate' at same depth level 1")
+	t.Log("Expected: ERROR: Duplicate function 'Duplicate' at same depth level 1")
 	t.Log("This test documents expected behavior - actual enforcement is via os.Exit(1)")
 
 	// Verify files exist

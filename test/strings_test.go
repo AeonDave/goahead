@@ -18,18 +18,18 @@ func TestSpecialStringContent(t *testing.T) {
 
 package main
 
-func getEmoji() string { return "Hello 🌍🚀✨" }
-func getChinese() string { return "你好世界" }
-func getArabic() string { return "مرحبا" }
+func GetEmoji() string { return "Hello 🌍🚀✨" }
+func GetChinese() string { return "你好世界" }
+func GetArabic() string { return "مرحبا" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getEmoji
+    //:GetEmoji
     emoji = ""
-    //:getChinese
+    //:GetChinese
     chinese = ""
-    //:getArabic
+    //:GetArabic
     arabic = ""
 )
 
@@ -56,15 +56,15 @@ func main() {}
 
 package main
 
-func getMultiline() string { return "line1\nline2\nline3" }
-func getTabs() string { return "col1\tcol2\tcol3" }
+func GetMultiline() string { return "line1\nline2\nline3" }
+func GetTabs() string { return "col1\tcol2\tcol3" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getMultiline
+    //:GetMultiline
     multi = ""
-    //:getTabs
+    //:GetTabs
     tabs = ""
 )
 
@@ -86,12 +86,12 @@ package main
 
 import "strings"
 
-func getLongString() string { return strings.Repeat("a", 10000) }
+func GetLongString() string { return strings.Repeat("a", 10000) }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getLongString
+    //:GetLongString
     long = ""
 )
 
@@ -114,12 +114,12 @@ func main() {}
 
 package main
 
-func getSQLish() string { return "'; DROP TABLE users; --" }
+func GetSQLish() string { return "'; DROP TABLE users; --" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getSQLish
+    //:GetSQLish
     sql = ""
 )
 
@@ -142,14 +142,14 @@ func main() {}
 
 package main
 
-func getJSON() string { 
+func GetJSON() string { 
     return "{\"name\": \"John\", \"age\": 30, \"nested\": {\"key\": \"value\"}}" 
 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getJSON
+    //:GetJSON
     jsonStr = ""
 )
 

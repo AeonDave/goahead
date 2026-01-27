@@ -19,15 +19,15 @@ package main
 
 import "strings"
 
-func greet(name string) string {
+func Greet(name string) string {
     return "Hello, " + strings.ToUpper(name)
 }
 
-func add(a, b int) int {
+func Add(a, b int) int {
     return a + b
 }
 
-func flagValue() bool {
+func FlagValue() bool {
     return true
 }
 `)
@@ -37,13 +37,13 @@ func flagValue() bool {
 import "fmt"
 
 var (
-    //:greet:"gopher"
+    //:Greet:"gopher"
     welcome = ""
 
-    //:add:19:23
+    //:Add:19:23
     total = 0
 
-    //:greet:=strings.TrimSpace(" gopher ")
+    //:Greet:=strings.TrimSpace(" gopher ")
     fancy = ""
 
     //:http.DetectContentType:=[]byte("plain text")
@@ -53,7 +53,7 @@ var (
 var ready = false
 
 func init() {
-    //:flagValue
+    //:FlagValue
     ready = false
 }
 

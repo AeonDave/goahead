@@ -20,14 +20,14 @@ package main
 
 import "strings"
 
-func process(s string) string { return strings.ToUpper(s) }
+func Process(s string) string { return strings.ToUpper(s) }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 import "strings"
 
 var (
-    //:process:=strings.TrimSpace(strings.ToLower("  HELLO  "))
+    //:Process:=strings.TrimSpace(strings.ToLower("  HELLO  "))
     val = ""
 )
 
@@ -77,7 +77,7 @@ func main() {}
 
 package main
 
-func getMapLen() int { 
+func GetMapLen() int { 
     m := map[string]int{"a": 1, "b": 2}
     return len(m) 
 }
@@ -85,7 +85,7 @@ func getMapLen() int {
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getMapLen
+    //:GetMapLen
     count = 0
 )
 
@@ -110,7 +110,7 @@ package main
 
 type Point struct { X, Y int }
 
-func getPointSum() int { 
+func GetPointSum() int { 
     p := Point{X: 10, Y: 20}
     return p.X + p.Y 
 }
@@ -118,7 +118,7 @@ func getPointSum() int {
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getPointSum
+    //:GetPointSum
     sum = 0
 )
 
@@ -144,12 +144,12 @@ func TestReplacementCornerCases(t *testing.T) {
 
 package main
 
-func getValue() int { return 42 }
+func GetValue() int { return 42 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getValue
+    //:GetValue
     val = 0 + 0 + 0
 )
 
@@ -172,12 +172,12 @@ func main() {}
 
 package main
 
-func getValue() string { return "replaced" }
+func GetValue() string { return "replaced" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getValue
+    //:GetValue
     val = "" + "" + ""
 )
 
@@ -200,12 +200,12 @@ func main() {}
 
 package main
 
-func isEnabled() bool { return true }
+func IsEnabled() bool { return true }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:isEnabled
+    //:IsEnabled
     val = false && true || false
 )
 
@@ -228,14 +228,14 @@ func main() {}
 
 package main
 
-func getValue() string { return "indented" }
+func GetValue() string { return "indented" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 func main() {
     if true {
         if true {
-            //:getValue
+            //:GetValue
             deeplyIndented := ""
             _ = deeplyIndented
         }

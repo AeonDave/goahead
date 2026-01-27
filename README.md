@@ -1,6 +1,6 @@
-# GoAhead → Compile-time Code Generation for Go
+# GoAhead
 
-GoAhead is a compile-time code generation tool for Go. It replaces placeholder comments with computed values at build time.
+Compile-time code generation for Go. Replace placeholder comments with computed values during build.
 
 [![CodeQL Advanced](https://github.com/AeonDave/goahead/actions/workflows/codeql.yml/badge.svg)](https://github.com/AeonDave/goahead/actions/workflows/codeql.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/AeonDave/goahead)](https://goreportcard.com/report/github.com/AeonDave/goahead)
@@ -10,28 +10,18 @@ GoAhead is a compile-time code generation tool for Go. It replaces placeholder c
 
 ![GoAhead](logo.png)
 
-## Highlights
-
-- Works with Go commands via `-toolexec` (build, test, run, generate)
-- Placeholder replacement keeps surrounding expressions intact
-- Supports parameterised helpers, raw Go expressions, and simple type inference
-- Supports standard-library packages directly (strings, strconv, os, http, etc.)
-- Depth-based function resolution: same-depth helpers are shared and deeper helpers can shadow
-- Supports variadic functions, constants, type definitions, and complex expressions
-- Cross-platform compatible (Linux, macOS, Windows)
-- Includes examples and an integration test suite
-
-## Installation
-
-```bash
-go install github.com/AeonDave/goahead@latest
-```
+**Features:**
+- Subcommand integration (`goahead build`, `goahead test`, `goahead run`)
+- Depth-based symbol resolution with shadowing
+- Function injection for runtime code generation
+- Variadic functions and raw expressions
+- Standard library auto-resolution
+- CGO compatible
+- Cross-platform
 
 ## Quick Start
 
-### 1. Declare build-time helpers
-
-Helpers live in files marked with both build tags. They are excluded from normal compilation but executed by GoAhead.
+**1. Create a helper file** (excluded from normal builds):
 
 ```go
 //go:build exclude
@@ -39,125 +29,41 @@ Helpers live in files marked with both build tags. They are excluded from normal
 
 package helpers
 
-import "strings"
+// Exported function (uppercase = available for placeholders)
+func Welcome(name string) string {
+    return "Hello, " + name + "!"
+}
 
-func welcome(name string) string {
-    return "Hello, " + strings.ToUpper(name)
+// unexported function (lowercase = NOT available)
+func formatInternal(s string) string {
+    return "[" + s + "]"
 }
 ```
 
-### 2. Reference helpers + build
+**2. Use placeholder in source**:
 
 ```go
 package main
 
-//:welcome:"gopher"
+//:Welcome:"gopher"
 var greeting = ""
+
+func main() {
+    println(greeting) // Prints: Hello, gopher!
+}
 ```
+
+**3. Build**:
 
 ```bash
-# Recommended (required for CGO projects)
 goahead build ./...
-
-# Alternative: toolexec mode (not recommended for CGO - see limitations below)
-go build -toolexec="goahead" ./...
 ```
 
 ---
 
-## Placeholder Grammar Reference
+## Export Requirements
 
-### Basic Syntax
-
-```
-//:functionName[:arg1[:arg2[:argN]]]
-```
-
-The placeholder comment must appear on the line **immediately before** the target statement or expression.
-
-> **Formatter compatibility**: GoAhead accepts optional spaces after `//`, so both `//:func:arg` and `// :func:arg` work identically. This prevents issues when code formatters add a space after `//`.
-
-### Argument Types
-
-| Type | Syntax | Examples |
-|------|--------|----------|
-| **String** | Double quotes | `"hello"`, `"production"`, `""` |
-| **Raw String** | Backticks | `` `raw\nstring` `` |
-| **Integer** | Unquoted number | `42`, `-17`, `0xFF`, `0o755`, `0b1010` |
-| **Float** | Decimal or scientific | `3.14`, `-2.5`, `1.5e10` |
-| **Boolean** | Unquoted | `true`, `false`, `True`, `False` |
-| **Raw Expression** | Prefix with `=` | `=strings.TrimSpace(input)` |
-
-### Number Formats
-
-GoAhead supports all Go number literal formats:
-
-```go
-//:process:42          // Decimal
-//:process:0xFF        // Hexadecimal  
-//:process:0o755       // Octal
-//:process:0b1010      // Binary
-//:process:-3.14       // Negative float
-//:process:1.5e10      // Scientific notation
-```
-
-### Raw Expressions
-
-Prefix an argument with `=` to pass a raw Go expression that will be evaluated at build time:
-
-```go
-//:hash:=strings.TrimSpace(input)
-//:detect:=[]byte{0x89, 0x50, 0x4E, 0x47}
-//:process:=map[string]int{"a": 1, "b": 2}
-```
-
-Raw expressions can contain colons (e.g., in map literals, struct literals, slice expressions) - GoAhead correctly parses nested brackets.
-
-### Variadic Functions
-
-GoAhead fully supports variadic helper functions:
-
-```go
-// Helper definition
-func joinAll(sep string, parts ...string) string {
-    return strings.Join(parts, sep)
-}
-
-func sum(nums ...int) int {
-    total := 0
-    for _, n := range nums { total += n }
-    return total
-}
-```
-
-```go
-// Usage - pass any number of arguments
-//:joinAll:"-":"a":"b":"c":"d"
-result = ""  // → "a-b-c-d"
-
-//:sum:1:2:3:4:5
-total = 0    // → 15
-```
-
-### Placeholder Targets
-
-The placeholder replaces the **first matching literal** in the following statement:
-
-| Return Type | Placeholder | Example Target |
-|-------------|-------------|----------------|
-| `string` | `""` or `` ` ` `` | `msg = ""`  |
-| `int` | `0` | `count = 0` |
-| `float64` | `0.0` | `rate = 0.0` |
-| `bool` | `false` | `enabled = false` |
-| `uint` | `0xff` (hex) | `flags = 0xff` |
-
----
-
-## Helper File Features
-
-### Constants and Variables
-
-Helper files can define constants and variables at package level:
+**Only exported (uppercase) symbols are available for placeholder replacement:**
 
 ```go
 //go:build exclude
@@ -165,153 +71,163 @@ Helper files can define constants and variables at package level:
 
 package helpers
 
-const (
-    Prefix    = "APP_"
-    Separator = "::"
-)
+// ✅ Available for placeholders
+func PublicAPI() string { return "public" }
+var ExportedVar = "visible"
+const ExportedConst = 42
+type ExportedType struct {}
 
-var defaultTimeout = 30
-
-func prefixed(key string) string {
-    return Prefix + key
-}
+// ❌ NOT available (private implementation)
+func internalHelper() string { return "private" }
+var privateVar = "hidden"
+const privateConst = 99
+type privateType struct {}
 ```
 
-### Custom Types
-
-Define and use custom types within helper files:
-
-```go
-type Status int
-
-const (
-    StatusPending Status = iota
-    StatusActive
-    StatusCompleted
-)
-
-func getDefaultStatus() Status {
-    return StatusActive
-}
-
-func statusName(s Status) string {
-    names := []string{"Pending", "Active", "Completed"}
-    return names[s]
-}
-```
-
-### Multiple Helper Files
-
-GoAhead scans the entire directory tree and resolves functions using **depth-based inheritance**:
-
-- Functions resolve **from the source depth up to depth 0** (root)
-- All helper functions at the **same depth are pooled and visible** across siblings
-- **Deeper shadows shallower**: functions at a deeper depth override the same name at a shallower depth
-- **Duplicate names at the same depth are a fatal error**
-
-```
-project/
-├── helpers.go        # version() -> "1.0.0", common() -> "shared" (depth 0)
-├── main.go           # uses version() → "1.0.0", common() → "shared"
-├── pkg1/
-│   ├── helpers.go    # version() -> "2.0.0-pkg1"  ← shadows depth 0 (depth 1)
-│   └── main.go       # uses version() → "2.0.0-pkg1", common() → "shared"
-└── pkg2/
-    ├── helpers.go    # extra() -> "pkg2" (depth 1, shared with pkg1)
-    └── main.go       # uses version() → "1.0.0", common() → "shared", extra() → "pkg2"
-```
-
-**Console output** shows which helper file was used:
-```
-[goahead] Replaced in pkg1/main.go: version() -> "2.0.0-pkg1" (from pkg1/helpers.go)
-[goahead] WARNING: Function 'version' at depth 1 (pkg1/helpers.go) shadows function at depth 0 (helpers.go)
-```
-
-⚠️ **Duplicate function names in the same directory cause a fatal error** - GoAhead will exit with an error showing both file locations.
+**Rationale:**
+- Aligns with Go conventions (export = public API)
+- Private functions remain for internal helper use only
+- Clearer separation of interface vs implementation
+- Injection requires exported functions anyway
 
 ---
 
-## Standard Library Integration
+## Usage Modes
 
-### Auto-detected Packages
+**Subcommands** (recommended, required for CGO):
+```bash
+goahead build ./...      # Process + build
+goahead test ./...       # Process + test  
+goahead run ./cmd/app    # Process + run
+```
 
-GoAhead automatically resolves common standard library packages:
+**Toolexec** (not for CGO):
+```bash
+go build -toolexec="goahead" ./...
+```
+
+**Standalone**:
+```bash
+goahead -dir=./mypackage -verbose
+```
+
+---
+
+## Placeholder Syntax
+
+```
+//:functionName[:arg1[:arg2[:argN]]]
+targetStatement = literalPlaceholder
+```
+
+The placeholder comment must appear **immediately before** the target statement. GoAhead replaces the first matching literal.
+
+**Argument types:**
+
+| Type | Example |
+|------|---------|
+| String | `"hello"`, `` `raw` `` |
+| Integer | `42`, `0xFF`, `0o755`, `0b1010` |
+| Float | `3.14`, `-2.5`, `1.5e10` |
+| Boolean | `true`, `false` |
+| Expression | `=strings.TrimSpace(" hi ")` |
+
+**Examples:**
 
 ```go
-//:strings.ToUpper:"hello"
-upper = ""  // → "HELLO"
+//:version:
+const Version = ""  // → "1.0.0"
 
-//:os.Getenv:"HOME"
-home = ""   // → "/home/user"
+//:add:10:20
+const Sum = 0  // → 30
 
-//:strconv.Itoa:42
-str = ""    // → "42"
-
-//:http.DetectContentType:=[]byte("PNG data")
-mime = ""   // → "application/octet-stream"
+//:hash:=[]byte{0x89, 0x50, 0x4E, 0x47}
+var h = ""  // → "hash_result"
 ```
+
+> **Note**: Both `//:func` and `// :func` are valid (space-tolerant for formatters).
+
+---
+
+## Depth-Based Symbol Resolution
+
+GoAhead resolves symbols (functions, variables, constants, types) using depth-based inheritance:
+
+**Rules:**
+1. **Only exported symbols** (uppercase) are tracked and available
+2. Symbols resolve from source depth **down to depth 0** (root)
+3. Same-depth symbols are **pooled and visible** across siblings
+4. **Deeper shadows shallower** - definitions at greater depth override parent definitions
+5. **Duplicates at same depth = FATAL ERROR**
+
+**Example:**
+
+```
+project/
+├── helpers.go            # var Seed = "root", Version() → "1.0" (depth 0)
+├── main.go               # uses Version() → "1.0"
+├── obfuscation/          # depth 1
+│   ├── helpers.go        # var Seed = "obf", Shadow() → "OBF"
+│   └── main.go           # uses Shadow() → "OBF"
+└── evasion/              # depth 1
+    └── obfuscation/      # depth 2
+        ├── helpers.go    # var Seed = "eva", Shadow() → "EVA" (shadows parent)
+        └── main.go       # uses Shadow() → "EVA"
+```
+
+**Console output shows resolution:**
+```
+[goahead] Replaced in main.go: Version() → "1.0" (from helpers.go)
+[goahead] WARNING: Symbol 'Shadow' at depth 2 shadows symbol at depth 1
+```
+
+This prevents "redeclared" errors when multiple helper files define the same variable/constant/type at different depths.
 
 ---
 
 ## Function Injection
 
-GoAhead can **inject entire functions** from helper files into your source code. This is useful for obfuscation scenarios where you need both an encoding function (executed at build time) and a decoding function (included in runtime).
+Inject entire functions from helpers into source files. Useful for obfuscation where you need both build-time encoding and runtime decoding.
 
-### Syntax
-
-Inject markers must appear **above an interface declaration** and reference methods that exist in that interface:
+**Syntax:**
 
 ```go
-//:inject:MethodName1
-//:inject:MethodName2
-type MyInterface interface {
-    MethodName1(args) returnType
-    MethodName2(args) returnType
+//:inject:MethodName
+type InterfaceName interface {
+    MethodName(args) returnType
 }
 ```
 
-GoAhead will:
-1. Validate that each method exists in the interface
-2. Find the implementation in helper files
-3. Inject the function code at the end of the file
-4. Preserve the markers for future re-injection on subsequent builds
+**Example:**
 
-### Example: String Obfuscation
-
-**Helper file** (`helpers.go`):
 ```go
+// helpers.go
 //go:build exclude
 //go:ahead functions
 
 package main
 
-const xorKey byte = 0x42
+const key = 0x42
 
 func Shadow(s string) string {
-    result := ""
+    out := ""
     for _, c := range s {
-        result += string(byte(c) ^ xorKey)
+        out += string(byte(c) ^ key)
     }
-    return result
+    return out
 }
 
 func Unshadow(s string) string {
-    result := ""
-    for _, c := range s {
-        result += string(byte(c) ^ xorKey)
-    }
-    return result
+    return Shadow(s) // XOR is reversible
 }
 ```
 
-**Source file** (`main.go`):
 ```go
+// main.go
 package main
 
-import "fmt"
-
-//:Shadow:"secret password"
-var encrypted = ""
+//:Shadow:"secret"
+var encoded = ""
 
 //:inject:Unshadow
 type Decoder interface {
@@ -319,195 +235,186 @@ type Decoder interface {
 }
 
 func main() {
-    fmt.Println(Unshadow(encrypted))
+    println(Unshadow(encoded))
 }
 ```
 
-**After processing**:
-```go
-package main
+**What gets injected:**
+- Function implementation
+- Required imports (unused imports filtered out)
+- Required constants/variables/types
+- Helper-to-helper dependencies
 
-import "fmt"
-
-var encrypted = "1'!0'6r2#115/0&"
-
-type Decoder interface {
-    Unshadow(s string) string
-}
-
-func main() {
-    fmt.Println(Unshadow(encrypted))
-}
-
-const xorKey byte = 0x42
-
-func Unshadow(s string) string {
-    result := ""
-    for _, c := range s {
-        result += string(byte(c) ^ xorKey)
-    }
-    return result
-}
-```
-
-### What Gets Injected
-
-When you use `//:inject:FunctionName` above an interface:
-
-1. **Validates** that the method exists in the interface (error if not)
-2. **Removes any existing function** with the same name (to allow updates)
-3. **Copies the function** from the helper file to the end of the source file
-4. **Adds required imports** - only imports actually used by the injected function (unused imports in helper files are filtered out)
-5. **Includes dependencies** (constants, variables, types) that the function uses
-6. **Includes helper-to-helper dependencies** (other helper functions called by the injected function)
-7. **Respects hierarchy** - uses the function from the nearest helper file
-8. **Preserves the marker** - the `//:inject:` comment stays in the source file
-
-### How Injection Works
-
-Unlike placeholder replacement (which is one-time), function injection is **repeatable**:
-
-1. **First build**: GoAhead finds the `//:inject:FunctionName` marker, copies the function from helpers, and adds it to the end of the file wrapped in `// Code generated by goahead. DO NOT EDIT.` comments
-2. **Marker stays**: The `//:inject:` comment remains in the source file
-3. **Subsequent builds**: GoAhead removes the old generated block, then re-injects the function from helpers
-4. **Updates propagate**: Change the helper file → next build updates the injected code automatically
-
-This allows you to:
-- Iterate on implementations without manual editing
-- Change encryption algorithms, obfuscation logic, etc. in one place
-- Keep build-time and runtime code in sync
-
-### Error Conditions
-
-- **Method not in interface**: If `//:inject:Foo` is used but `Foo` is not a method in the interface, GoAhead exits with an error
-- **Markers not followed by interface**: If inject markers are not immediately followed by an interface declaration, GoAhead exits with an error
-- **Implementation not found**: If no helper file contains the function, GoAhead exits with an error
+**Behavior:**
+- Markers **stay** in source (repeatable injection)
+- Previous injected code is **removed and re-injected** on each build
+- Updates to helpers **propagate automatically**
 
 ---
 
-## CGO Compatibility
+## Standard Library
 
-GoAhead works correctly with CGO files:
+Auto-detected stdlib packages work directly:
 
 ```go
-package main
+//:strings.ToUpper:"hello"
+var upper = ""  // → "HELLO"
 
-/*
-#include <stdio.h>
-#cgo LDFLAGS: -lm
+//:os.Getenv:"HOME"
+var home = ""
 
-// C comments with colons: like:this are preserved
-*/
-import "C"
+//:strconv.Itoa:42
+var str = ""  // → "42"
 
-var (
-    //:getLibVersion
-    libVersion = ""
-)
+//:http.DetectContentType:=[]byte("data")
+var mime = ""
 ```
 
-CGO preambles, directives, and comments are fully preserved.
+---
+
+## Variadic Functions
+
+```go
+// Helper
+func join(sep string, parts ...string) string {
+    return strings.Join(parts, sep)
+}
+
+// Usage
+//:join:"-":"a":"b":"c"
+var result = ""  // → "a-b-c"
+```
+
+---
+
+## Installation
+
+```bash
+go install github.com/AeonDave/goahead@latest
+```
+
+---
+
+## Command Reference
+
+**Subcommands:**
+```bash
+goahead build [flags] <packages>    # Process then build
+goahead test [flags] <packages>     # Process then test
+goahead run [flags] <package>       # Process then run
+```
+
+**Standalone:**
+```bash
+goahead -dir=<path> [-verbose] [-version] [-help]
+```
+
+**Environment:**
+```bash
+GOAHEAD_VERBOSE=1    # Enable verbose output
+```
+
+---
+
+## CGO Projects
+
+**Always use subcommands** for CGO projects:
+
+```bash
+goahead build -tags production ./...
+```
+
+**Why?** Toolexec mode (`-toolexec="goahead"`) creates race conditions with parallel CGO compilation, causing corrupted binaries.
+
+---
+
+## Submodule Isolation
+
+GoAhead automatically detects and isolates subdirectories with their own `go.mod` files:
+
+```
+monorepo/
+├── go.mod                    # Main module
+├── helpers.go                # Version() → "1.0-main"
+├── main.go                   # Uses Version() → "1.0-main"
+└── subproject/               # ← Has its own go.mod
+    ├── go.mod                # Separate module
+    ├── helpers.go            # Version() → "2.0-sub" (independent)
+    └── main.go               # Uses Version() → "2.0-sub"
+```
+
+**Behavior:**
+- Submodules are **completely isolated** - they don't see parent helpers
+- Parent project doesn't see submodule helpers
+- Each submodule is processed as a **separate tree** starting at depth 0
+- **Single `goahead` invocation** processes everything (recursively)
+- Works with **nested submodules** (submodules containing submodules)
+
+**Use case:** Monorepos with multiple Go modules that need independent code generation.
+
+**Console output:**
+```
+[goahead] Found submodule: subproject
+[goahead] Processing submodule: subproject
+```
 
 ---
 
 ## Limitations
 
-### Toolexec Mode with CGO
+**Placeholder replacement is one-time:**
+- After replacement, the literal stays in source
+- Re-running on processed code has no effect
+- To update, restore the original placeholder comment
 
-When using `-toolexec="goahead"` mode with CGO enabled, Go may invoke multiple compilers in parallel. Since GoAhead modifies source files in-place during compilation, this creates a **race condition** that can result in:
-- Corrupted binaries
-- "Not a valid application" errors
-- Unpredictable build failures
-
-**Solution**: Always use subcommand mode for CGO projects:
-```bash
-# DO this for CGO projects
-goahead build -tags logging -o myapp.exe
-
-# DON'T do this for CGO projects
-go build -tags logging -toolexec="goahead" -o myapp.exe
-```
-
-Subcommand mode runs codegen **before** compilation starts, avoiding the race condition entirely.
-
-### Placeholder Replacement is One-Time
-
-Placeholder comments (e.g., `//:functionName:arg`) are replaced **once** with their computed value:
-- After replacement, the literal value stays in the source
-- Re-running GoAhead on already-processed code has no effect
-- To update, restore the original placeholder comment manually
-
-**Exception**: Function injection markers (`//:inject:`) are **repeatable** - they remain in the file and re-inject on every build.
+**Exception:** Injection markers (`//:inject:`) are repeatable and stay in source.
 
 ---
 
-## Command-line Reference
+## Troubleshooting
 
-### Subcommand Mode (Recommended)
+**Function not found:**
+- Verify `//go:build exclude` and `//go:ahead functions` tags
+- Check function name is exact match (case-sensitive)
+- Ensure argument count matches signature
 
-```bash
-goahead build [build flags] <packages>
-goahead test [test flags] <packages>
-goahead run [run flags] <package>
-```
+**Type mismatch:**
+- Match placeholder to return type: `0` for int, `""` for string, etc.
 
-Runs codegen first, then executes the corresponding `go` command with all flags passed through.
-
-**Examples:**
-```bash
-goahead build ./...                           # Build all packages
-goahead build -o app.exe -trimpath ./cmd/app  # Build with flags
-goahead test -v -race ./...                   # Run tests with race detector
-goahead run ./cmd/server                      # Run main package
-```
-
-### Toolexec Mode
-
-```bash
-go build -toolexec="goahead" <packages>
-go test -toolexec="goahead" <packages>
-```
-
-⚠️ **Not recommended for CGO projects** (see Limitations above).
-
-### Standalone Mode
-
-```
-goahead -dir=<path> [-verbose] [-version]
-```
-
-| Flag | Description |
-|------|-------------|
-| `-dir` | Directory to process (default `.`) |
-| `-verbose` | Print detailed progress information |
-| `-version` | Print the tool version and exit |
-| `-help` | Show the extended usage banner |
-
-### Environment Variables
-
-```bash
-GOAHEAD_VERBOSE=1   # Force verbose output when invoked via toolexec
-```
+**Colons in arguments:**
+- Wrap strings: `"http://localhost:8080"`
+- Use expressions: `=map[string]int{"key": 1}`
 
 ---
 
-- Ensure helper file has both `//go:build exclude` and `//go:ahead functions`
-- Check function name matches exactly (case-sensitive)
-- Verify argument count matches function signature
+## Examples
 
-### Type mismatch
+See [`examples/`](examples/) directory:
+- `base/` - Basic placeholder usage
+- `config/` - Configuration generation
+- `constants/` - Constant definitions
+- `directives/` - Build directives
+- `expressions/` - Raw expressions
+- `stdlib_e/` - Standard library integration
+- `types/` - Custom types
+- `variadic/` - Variadic functions
 
-- Ensure the literal placeholder matches the return type
-- Use `0` for int, `0.0` for float, `""` for string, `false` for bool
+---
 
-### Colon in argument
+## Contributing
 
-- Wrap strings in quotes: `"http://localhost:8080"`
-- For raw expressions, use `=`: `//:process:=map[string]int{"a": 1}`
+See [AGENTS.md](AGENTS.md) for development guidelines.
 
-### CGO errors
+**Before submitting:**
+1. Run `go test ./...` - all tests must pass
+2. Add tests for new features
+3. Update AGENTS.md for structural changes
+4. Update README.md for user-facing changes
 
-- GoAhead preserves CGO preambles - check C code syntax separately
-- Ensure `import "C"` appears alone after the preamble
+---
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file.
 
 

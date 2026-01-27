@@ -19,15 +19,15 @@ package main
 
 import "strings"
 
-func makeGreeting(name string) string {
+func MakeGreeting(name string) string {
     return "Hello, " + strings.ToUpper(strings.TrimSpace(name))
 }
 
-func sum(a, b int) int { return a + b }
+func Sum(a, b int) int { return a + b }
 
-func pi() float64 { return 3.1415 }
+func Pi() float64 { return 3.1415 }
 
-func flag() bool { return true }
+func Flag() bool { return true }
 `)
 
 	writeFile(t, dir, "main.go", `package main
@@ -38,29 +38,29 @@ import (
 )
 
 var (
-    //:makeGreeting:"gopher"
+    //:MakeGreeting:"gopher"
     greeting = ""
 
-    //:sum:19:23
+    //:Sum:19:23
     result = 0
 
-    //:pi
+    //:Pi
     circumference = 0.0
 
-    //:flag
+    //:Flag
     ready = false
 
-    //:makeGreeting:=strings.TrimSpace(" dev ")
+    //:MakeGreeting:=strings.TrimSpace(" dev ")
     trimmed = ""
 )
 
 func main() {
-    //:makeGreeting:"team"
-    fmt.Println(makeGreeting("team"))
+    //:MakeGreeting:"team"
+    fmt.Println(MakeGreeting("team"))
     fmt.Println(greeting, result, circumference, ready, trimmed)
 }
 
-func makeGreeting(name string) string { return "" }
+func MakeGreeting(name string) string { return "" }
 `)
 
 	writeFile(t, dir, "go.mod", `module testmod
@@ -93,7 +93,7 @@ go 1.22
 	}
 
 	// Verify generated code compiles
-	verifyCompiles(t, dir)
+	verifyCompiles(t, got)
 }
 
 func TestRunCodegenSkipsBlankLinesAfterComment(t *testing.T) {
@@ -104,13 +104,13 @@ func TestRunCodegenSkipsBlankLinesAfterComment(t *testing.T) {
 
 package main
 
-func makeGreeting(name string) string { return "Hello, " + name }
+func MakeGreeting(name string) string { return "Hello, " + name }
 `)
 
 	writeFile(t, dir, "main.go", `package main
 
 var (
-    //:makeGreeting:"gopher"
+    //:MakeGreeting:"gopher"
 
     greeting = ""
 )
@@ -126,7 +126,7 @@ var (
 	}
 	got := string(content)
 
-	expected := "//:makeGreeting:\"gopher\"\n\n    greeting = \"Hello, gopher\""
+	expected := "//:MakeGreeting:\"gopher\"\n\n    greeting = \"Hello, gopher\""
 	if !strings.Contains(got, expected) {
 		t.Fatalf("output missing expected block\nwant:\n%s\n---- got ----\n%s", expected, got)
 	}
@@ -140,13 +140,13 @@ func TestRunCodegenHandlesMultiReturnFunctions(t *testing.T) {
 
 package main
 
-func fetchValue() (string, error) { return "multi", nil }
+func FetchValue() (string, error) { return "multi", nil }
 `)
 
 	writeFile(t, dir, "main.go", `package main
 
 var (
-    //:fetchValue
+    //:FetchValue
     result = ""
 )
 `)

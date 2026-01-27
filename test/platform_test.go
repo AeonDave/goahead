@@ -18,12 +18,12 @@ func TestCrossPlatformPaths(t *testing.T) {
 
 package main
 
-func getWindowsPath() string { return "C:\\Users\\test\\file.txt" }
+func GetWindowsPath() string { return "C:\\Users\\test\\file.txt" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getWindowsPath
+    //:GetWindowsPath
     path = ""
 )
 
@@ -46,12 +46,12 @@ func main() {}
 
 package main
 
-func getUnixPath() string { return "/usr/local/bin/app" }
+func GetUnixPath() string { return "/usr/local/bin/app" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getUnixPath
+    //:GetUnixPath
     path = ""
 )
 
@@ -74,12 +74,12 @@ func main() {}
 
 package main
 
-func getSpacePath() string { return "C:\\Program Files\\My App\\config.txt" }
+func GetSpacePath() string { return "C:\\Program Files\\My App\\config.txt" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getSpacePath
+    //:GetSpacePath
     path = ""
 )
 
@@ -105,7 +105,7 @@ func TestContextPreservation(t *testing.T) {
 
 package main
 
-func getValue() string { return "value" }
+func GetValue() string { return "value" }
 `)
 		writeFile(t, dir, "main.go", `// Package main provides the main entry point.
 // This is a multi-line package comment
@@ -113,7 +113,7 @@ func getValue() string { return "value" }
 package main
 
 var (
-    //:getValue
+    //:GetValue
     val = ""
 )
 
@@ -136,14 +136,14 @@ func main() {}
 
 package main
 
-func getValue() string { return "value" }
+func GetValue() string { return "value" }
 `)
 		writeFile(t, dir, "main.go", `//go:build linux && amd64
 
 package main
 
 var (
-    //:getValue
+    //:GetValue
     val = ""
 )
 
@@ -166,7 +166,7 @@ func main() {}
 
 package main
 
-func getValue() string { return "value" }
+func GetValue() string { return "value" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
@@ -178,7 +178,7 @@ import (
 )
 
 var (
-    //:getValue
+    //:GetValue
     val = ""
 )
 

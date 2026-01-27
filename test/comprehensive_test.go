@@ -38,7 +38,7 @@ func main() {}
 
 package main
 
-func unused() string { return "unused" }
+func Unused() string { return "unused" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
@@ -59,20 +59,20 @@ func main() {
 
 package main
 
-func jsonString() string { return "{\"key\": \"value\"}" }
-func pathString() string { return "C:\\Users\\test\\file.txt" }
-func multilineString() string { return "line1\nline2\nline3" }
+func JsonString() string { return "{\"key\": \"value\"}" }
+func PathString() string { return "C:\\Users\\test\\file.txt" }
+func MultilineString() string { return "line1\nline2\nline3" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:jsonString
+    //:JsonString
     json = ""
     
-    //:pathString
+    //:PathString
     path = ""
     
-    //:multilineString
+    //:MultilineString
     multi = ""
 )
 
@@ -105,20 +105,20 @@ func main() {}
 
 package main
 
-func positiveUint() uint { return 255 }
-func negativeInt() int { return -42 }
-func largeInt() int64 { return 9223372036854775807 }
+func PositiveUint() uint { return 255 }
+func NegativeInt() int { return -42 }
+func LargeInt() int64 { return 9223372036854775807 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:positiveUint
+    //:PositiveUint
     uval = 0
     
-    //:negativeInt
+    //:NegativeInt
     neg = 0
     
-    //:largeInt
+    //:LargeInt
     large = 0
 )
 
@@ -157,12 +157,12 @@ func TestArgumentParsing(t *testing.T) {
 
 package main
 
-func concat(a, b, c string) string { return a + b + c }
+func Concat(a, b, c string) string { return a + b + c }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:concat:"hello":"world":"!"
+    //:Concat:"hello":"world":"!"
     result = ""
 )
 
@@ -193,12 +193,12 @@ package main
 
 import "fmt"
 
-func mixed(s string, i int, b bool) string { return fmt.Sprintf("%s-%d-%t", s, i, b) }
+func Mixed(s string, i int, b bool) string { return fmt.Sprintf("%s-%d-%t", s, i, b) }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:mixed:"test":42:true
+    //:Mixed:"test":42:true
     result = ""
 )
 
@@ -227,12 +227,12 @@ func main() {}
 
 package main
 
-func identity(s string) string { return s }
+func Identity(s string) string { return s }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:identity:"http://example.com:8080/path"
+    //:Identity:"http://example.com:8080/path"
     url = ""
 )
 
@@ -266,14 +266,14 @@ package main
 
 import "strings"
 
-func process(s string) string { return strings.ToUpper(s) }
+func Process(s string) string { return strings.ToUpper(s) }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 import "strings"
 
 var (
-    //:process:=strings.TrimSpace("  hello  ")
+    //:Process:=strings.TrimSpace("  hello  ")
     trimmed = ""
 )
 
@@ -304,24 +304,24 @@ func TestFloatHandling(t *testing.T) {
 
 package main
 
-func getFloat32() float32 { return 3.14159 }
-func getFloat64() float64 { return 2.718281828 }
-func getSmallFloat() float64 { return 0.000001 }
-func getLargeFloat() float64 { return 1e10 }
+func GetFloat32() float32 { return 3.14159 }
+func GetFloat64() float64 { return 2.718281828 }
+func GetSmallFloat() float64 { return 0.000001 }
+func GetLargeFloat() float64 { return 1e10 }
 `)
 	writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getFloat32
+    //:GetFloat32
     f32 = 0.0
     
-    //:getFloat64
+    //:GetFloat64
     f64 = 0.0
     
-    //:getSmallFloat
+    //:GetSmallFloat
     small = 0.0
     
-    //:getLargeFloat
+    //:GetLargeFloat
     large = 0.0
 )
 
@@ -355,16 +355,16 @@ func TestBooleanHandling(t *testing.T) {
 
 package main
 
-func getTrue() bool { return true }
-func getFalse() bool { return false }
+func GetTrue() bool { return true }
+func GetFalse() bool { return false }
 `)
 	writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getTrue
+    //:GetTrue
     isEnabled = false
     
-    //:getFalse
+    //:GetFalse
     isDisabled = false
 )
 
@@ -384,7 +384,7 @@ func main() {}
 	if !strings.Contains(got, "isEnabled = true") {
 		t.Fatalf("true bool not replaced\n---- got ----\n%s", got)
 	}
-	// getFalse restituisce false, ma il placeholder era già false
+	// GetFalse restituisce false, ma il placeholder era già false
 	// quindi verifichiamo solo che il file sia valido
 }
 
@@ -398,7 +398,7 @@ func TestMultipleFunctionFiles(t *testing.T) {
 
 package main
 
-func greeting() string { return "Hello" }
+func Greeting() string { return "Hello" }
 `)
 
 	// Secondo file di funzioni
@@ -407,16 +407,16 @@ func greeting() string { return "Hello" }
 
 package main
 
-func farewell() string { return "Goodbye" }
+func Farewell() string { return "Goodbye" }
 `)
 
 	writeFile(t, dir, "main.go", `package main
 
 var (
-    //:greeting
+    //:Greeting
     hello = ""
     
-    //:farewell
+    //:Farewell
     bye = ""
 )
 
@@ -451,7 +451,7 @@ func TestNestedDirectories(t *testing.T) {
 
 package main
 
-func rootFunc() string { return "root" }
+func RootFunc() string { return "root" }
 `)
 
 	// File in una subdirectory
@@ -466,7 +466,7 @@ var (
 	writeFile(t, dir, "main.go", `package main
 
 var (
-    //:rootFunc
+    //:RootFunc
     fromRoot = ""
 )
 
@@ -496,18 +496,18 @@ func TestCaching(t *testing.T) {
 
 package main
 
-func repeated() string { return "cached_value" }
+func Repeated() string { return "cached_value" }
 `)
 	writeFile(t, dir, "main.go", `package main
 
 var (
-    //:repeated
+    //:Repeated
     first = ""
     
-    //:repeated
+    //:Repeated
     second = ""
     
-    //:repeated
+    //:Repeated
     third = ""
 )
 
@@ -539,12 +539,12 @@ func TestInlineAssignment(t *testing.T) {
 
 package main
 
-func getValue() string { return "inline_value" }
+func GetValue() string { return "inline_value" }
 `)
 	writeFile(t, dir, "main.go", `package main
 
 func main() {
-    //:getValue
+    //:GetValue
     localVar := ""
     _ = localVar
 }
@@ -573,12 +573,12 @@ func TestVerboseMode(t *testing.T) {
 
 package main
 
-func verboseTest() string { return "verbose" }
+func VerboseTest() string { return "verbose" }
 `)
 	writeFile(t, dir, "main.go", `package main
 
 var (
-    //:verboseTest
+    //:VerboseTest
     v = ""
 )
 

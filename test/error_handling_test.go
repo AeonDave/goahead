@@ -43,12 +43,12 @@ func main() {}
 
 package main
 
-func twoArgs(a, b string) string { return a + b }
+func TwoArgs(a, b string) string { return a + b }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:twoArgs:"only_one"
+    //:TwoArgs:"only_one"
     result = ""
 )
 
@@ -68,14 +68,14 @@ func main() {}
 
 package main
 
-func validFunc() string { return "valid" }
+func ValidFunc() string { return "valid" }
 
 // Commento valido alla fine
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:validFunc
+    //:ValidFunc
     value = ""
 )
 
@@ -97,22 +97,22 @@ func TestDuplicateFunctionHandling(t *testing.T) {
 
 package main
 
-func uniqueFunc1() string { return "from_file_1" }
+func UniqueFunc1() string { return "from_file_1" }
 `)
 	writeFile(t, dir, "helpers2.go", `//go:build exclude
 //go:ahead functions
 
 package main
 
-func uniqueFunc2() string { return "from_file_2" }
+func UniqueFunc2() string { return "from_file_2" }
 `)
 	writeFile(t, dir, "main.go", `package main
 
 var (
-    //:uniqueFunc1
+    //:UniqueFunc1
     v1 = ""
     
-    //:uniqueFunc2
+    //:UniqueFunc2
     v2 = ""
 )
 
@@ -133,12 +133,12 @@ func TestCommentFormats(t *testing.T) {
 
 package main
 
-func spacedFunc() string { return "spaced" }
+func SpacedFunc() string { return "spaced" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    // :spacedFunc
+    // :SpacedFunc
     value = ""
 )
 
@@ -157,12 +157,12 @@ func main() {}
 
 package main
 
-func tabbedFunc() string { return "tabbed" }
+func TabbedFunc() string { return "tabbed" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-	//:tabbedFunc
+	//:TabbedFunc
 	value = ""
 )
 
@@ -264,12 +264,12 @@ package main
 
 import "strings"
 
-func chain(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }
+func Chain(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:chain:"  test  "
+    //:Chain:"  test  "
     result = ""
 )
 
@@ -288,14 +288,14 @@ func main() {}
 
 package main
 
-func getPort() int { return 8080 }
+func GetPort() int { return 8080 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 import "fmt"
 
 func startServer() {
-    //:getPort
+    //:GetPort
     port := 0
     fmt.Printf("Starting on port %d\n", port)
 }
@@ -347,7 +347,7 @@ func TestPreservesNonMatchingCode(t *testing.T) {
 
 package main
 
-func getConfig() string { return "config_value" }
+func GetConfig() string { return "config_value" }
 `)
 
 	originalCode := `package main
@@ -364,7 +364,7 @@ const (
 )
 
 var (
-    //:getConfig
+    //:GetConfig
     config = ""
     
     // Regular comment

@@ -18,7 +18,7 @@ func TestGoDirectiveCornerCases(t *testing.T) {
 
 package main
 
-func getGeneratedValue() string { return "generated" }
+func GetGeneratedValue() string { return "generated" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
@@ -26,7 +26,7 @@ func getGeneratedValue() string { return "generated" }
 //go:generate go run ./gen/...
 
 var (
-    //:getGeneratedValue
+    //:GetGeneratedValue
     val = ""
 )
 
@@ -52,7 +52,7 @@ func main() {}
 
 package main
 
-func getEmbedName() string { return "config.json" }
+func GetEmbedName() string { return "config.json" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
@@ -67,7 +67,7 @@ var configData string
 var templateDir embed.FS
 
 var (
-    //:getEmbedName
+    //:GetEmbedName
     embedFile = ""
 )
 
@@ -93,12 +93,12 @@ func main() {}
 
 package main
 
-func getOptLevel() int { return 3 }
+func GetOptLevel() int { return 3 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:getOptLevel
+    //:GetOptLevel
     optLevel = 0
 )
 
@@ -138,7 +138,7 @@ func main() {}
 
 package main
 
-func getLinkTarget() string { return "runtime.throw" }
+func GetLinkTarget() string { return "runtime.throw" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
@@ -150,7 +150,7 @@ import (
 func runtimeThrow(s string)
 
 var (
-    //:getLinkTarget
+    //:GetLinkTarget
     linkTarget = ""
 )
 
@@ -173,7 +173,7 @@ func main() {}
 
 package main
 
-func getPlatform() string { return "windows" }
+func GetPlatform() string { return "windows" }
 `)
 		writeFile(t, dir, "platform_windows.go", `//go:build windows && amd64
 // +build windows,amd64
@@ -181,7 +181,7 @@ func getPlatform() string { return "windows" }
 package main
 
 var (
-    //:getPlatform
+    //:GetPlatform
     platform = ""
 )
 `)
@@ -205,14 +205,14 @@ var (
 
 package main
 
-func getMsg() string { return "hello" }
+func GetMsg() string { return "hello" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 //go:generate stringer -type=MyType
 
 var (
-    //:getMsg
+    //:GetMsg
     msg = ""
     //:strings.ToUpper:"world"
     upperWorld = "WORLD"

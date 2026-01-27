@@ -36,18 +36,18 @@ func lastFunc() string { return "last" }
 
 package main
 
-func first() string { return "1st" }
-func second() string { return "2nd" }
-func third() string { return "3rd" }
+func First() string { return "1st" }
+func Second() string { return "2nd" }
+func Third() string { return "3rd" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:first
+    //:First
     a = ""
-    //:second
+    //:Second
     b = ""
-    //:third
+    //:Third
     c = ""
 )
 
@@ -71,12 +71,12 @@ func main() {}
 
 package main
 
-func spaceTest() string { return "space" }
+func SpaceTest() string { return "space" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //   :spaceTest
+    //   :SpaceTest
     val = ""
 )
 
@@ -95,9 +95,9 @@ func main() {}
 
 package main
 
-func tabTest() string { return "tab" }
+func TabTest() string { return "tab" }
 `)
-		content := "package main\n\nvar (\n\t//\t:tabTest\n\tval = \"\"\n)\n\nfunc main() {}\n"
+		content := "package main\n\nvar (\n\t//\t:TabTest\n\tval = \"\"\n)\n\nfunc main() {}\n"
 		writeFile(t, dir, "main.go", content)
 		err := internal.RunCodegen(dir, false)
 		if err != nil {
@@ -112,18 +112,18 @@ func tabTest() string { return "tab" }
 
 package main
 
-func get123Value() string { return "123" }
-func getValue456() string { return "456" }
-func v7() int { return 7 }
+func Get123Value() string { return "123" }
+func GetValue456() string { return "456" }
+func V7() int { return 7 }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:get123Value
+    //:Get123Value
     a = ""
-    //:getValue456
+    //:GetValue456
     b = ""
-    //:v7
+    //:V7
     c = 0
 )
 
@@ -147,12 +147,12 @@ func main() {}
 
 package main
 
-func get_value() string { return "underscore" }
+func Get_value() string { return "underscore" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:get_value
+    //:Get_value
     a = ""
 )
 
@@ -175,12 +175,12 @@ func main() {}
 
 package main
 
-func noArgs() string { return "no args" }
+func NoArgs() string { return "no args" }
 `)
 		writeFile(t, dir, "main.go", `package main
 
 var (
-    //:noArgs:
+    //:NoArgs:
     val = ""
 )
 
@@ -194,7 +194,7 @@ func main() {}
 
 	t.Run("VeryLongFunctionName", func(t *testing.T) {
 		dir := t.TempDir()
-		longName := "thisIsAVeryLongFunctionNameThatExceedsNormalExpectationsForReadability"
+		longName := "ThisIsAVeryLongFunctionNameThatExceedsNormalExpectationsForReadability"
 		writeFile(t, dir, "helpers.go", `//go:build exclude
 //go:ahead functions
 

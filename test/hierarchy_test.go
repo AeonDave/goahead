@@ -10,8 +10,14 @@ import (
 )
 
 // TestHierarchyBasic tests that a function in the root is available in subdirectories
+// (when the subdirectory is part of the same module, i.e., NO go.mod in subdirectory)
 func TestHierarchyBasic(t *testing.T) {
 	dir := t.TempDir()
+
+	// Root go.mod (required for the module)
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
 
 	// Root helper file
 	writeFile(t, dir, "helpers.go", `//go:build exclude
@@ -19,22 +25,20 @@ func TestHierarchyBasic(t *testing.T) {
 
 package main
 
-func globalFunc() string { return "from-root" }
+func GlobalFunc() string { return "from-root" }
 `)
 
-	// Subdirectory source file
+	// Subdirectory source file - NO go.mod means it's part of parent project
 	subDir := filepath.Join(dir, "sub")
 	writeFile(t, dir, "sub/main.go", `package main
 
-//:globalFunc
+//:GlobalFunc
 var msg = ""
 
 func main() { _ = msg }
 `)
 
-	writeFile(t, dir, "sub/go.mod", `module testmod
-go 1.22
-`)
+	// NOTE: No go.mod in sub/ - this means sub/ inherits parent's helpers
 
 	err := internal.RunCodegen(dir, false)
 	if err != nil {
@@ -60,7 +64,7 @@ func TestHierarchyShadowing(t *testing.T) {
 
 package main
 
-func version() string { return "1.0.0" }
+func Version() string { return "1.0.0" }
 `)
 
 	// Subdirectory helper file that shadows version()
@@ -69,21 +73,21 @@ func version() string { return "1.0.0" }
 
 package main
 
-func version() string { return "2.0.0-sub" }
+func Version() string { return "2.0.0-sub" }
 `)
 
 	// Subdirectory source file
 	subDir := filepath.Join(dir, "sub")
 	writeFile(t, dir, "sub/main.go", `package main
 
-//:version
+//:Version
 var v = ""
 `)
 
 	// Root source file
 	writeFile(t, dir, "main.go", `package main
 
-//:version
+//:Version
 var v = ""
 `)
 
@@ -115,8 +119,8 @@ func TestHierarchyDeepNesting(t *testing.T) {
 
 package main
 
-func rootOnly() string { return "root-only" }
-func shared() string { return "root-shared" }
+func RootOnly() string { return "root-only" }
+func Shared() string { return "root-shared" }
 `)
 
 	// Level 1 helper - shadows shared
@@ -125,8 +129,8 @@ func shared() string { return "root-shared" }
 
 package main
 
-func shared() string { return "pkg1-shared" }
-func pkg1Only() string { return "pkg1-only" }
+func Shared() string { return "pkg1-shared" }
+func Pkg1Only() string { return "pkg1-only" }
 `)
 
 	// Level 2 helper - shadows shared again
@@ -135,42 +139,42 @@ func pkg1Only() string { return "pkg1-only" }
 
 package main
 
-func shared() string { return "deep-shared" }
+func Shared() string { return "deep-shared" }
 `)
 
 	// Source in root
 	writeFile(t, dir, "main.go", `package main
 
-//:rootOnly
+//:RootOnly
 var r = ""
 
-//:shared
+//:Shared
 var s = ""
 `)
 
 	// Source in pkg1
 	writeFile(t, dir, "pkg1/main.go", `package main
 
-//:rootOnly
+//:RootOnly
 var r = ""
 
-//:shared
+//:Shared
 var s = ""
 
-//:pkg1Only
+//:Pkg1Only
 var p = ""
 `)
 
 	// Source in pkg1/deep
 	writeFile(t, dir, "pkg1/deep/main.go", `package main
 
-//:rootOnly
+//:RootOnly
 var r = ""
 
-//:shared
+//:Shared
 var s = ""
 
-//:pkg1Only
+//:Pkg1Only
 var p = ""
 `)
 
@@ -223,20 +227,20 @@ func TestHierarchyNoInheritanceUpward(t *testing.T) {
 
 package main
 
-func subOnly() string { return "sub-only" }
+func SubOnly() string { return "sub-only" }
 `)
 
 	// Source file in root trying to use subdirectory function (should fail)
 	writeFile(t, dir, "main.go", `package main
 
-//:subOnly
+//:SubOnly
 var s = ""
 `)
 
 	// Source file in subdirectory (should work)
 	writeFile(t, dir, "sub/main.go", `package main
 
-//:subOnly
+//:SubOnly
 var s = ""
 `)
 
@@ -269,7 +273,7 @@ func TestHierarchySiblingVisibility(t *testing.T) {
 
 package main
 
-func common() string { return "common" }
+func Common() string { return "common" }
 `)
 
 	// pkg1 helper
@@ -278,7 +282,7 @@ func common() string { return "common" }
 
 package main
 
-func pkg1Func() string { return "pkg1-func" }
+func Pkg1Func() string { return "pkg1-func" }
 `)
 
 	// pkg2 helper
@@ -287,32 +291,32 @@ func pkg1Func() string { return "pkg1-func" }
 
 package main
 
-func pkg2Func() string { return "pkg2-func" }
+func Pkg2Func() string { return "pkg2-func" }
 `)
 
 	// pkg1 source - with depth-based resolution, sees all functions at depth 0 and depth 1
 	writeFile(t, dir, "pkg1/main.go", `package main
 
-//:common
+//:Common
 var c = ""
 
-//:pkg1Func
+//:Pkg1Func
 var p1 = ""
 
-//:pkg2Func
+//:Pkg2Func
 var p2 = ""
 `)
 
 	// pkg2 source - with depth-based resolution, sees all functions at depth 0 and depth 1
 	writeFile(t, dir, "pkg2/main.go", `package main
 
-//:common
+//:Common
 var c = ""
 
-//:pkg2Func
+//:Pkg2Func
 var p2 = ""
 
-//:pkg1Func
+//:Pkg1Func
 var p1 = ""
 `)
 
@@ -324,27 +328,27 @@ var p1 = ""
 	// Check pkg1 - now sees ALL functions at depth 0 and depth 1
 	pkg1Content, _ := os.ReadFile(filepath.Join(dir, "pkg1/main.go"))
 	if !strings.Contains(string(pkg1Content), `"common"`) {
-		t.Errorf("pkg1 should see common, got: %s", pkg1Content)
+		t.Errorf("pkg1 should see Common, got: %s", pkg1Content)
 	}
 	if !strings.Contains(string(pkg1Content), `"pkg1-func"`) {
-		t.Errorf("pkg1 should see pkg1Func, got: %s", pkg1Content)
+		t.Errorf("pkg1 should see Pkg1Func, got: %s", pkg1Content)
 	}
-	// NEW: With depth-based resolution, pkg1 CAN see pkg2Func (same depth)
+	// NEW: With depth-based resolution, pkg1 CAN see Pkg2Func (same depth)
 	if !strings.Contains(string(pkg1Content), `"pkg2-func"`) {
-		t.Errorf("pkg1 should see pkg2Func (same depth), got: %s", pkg1Content)
+		t.Errorf("pkg1 should see Pkg2Func (same depth), got: %s", pkg1Content)
 	}
 
 	// Check pkg2 - now sees ALL functions at depth 0 and depth 1
 	pkg2Content, _ := os.ReadFile(filepath.Join(dir, "pkg2/main.go"))
 	if !strings.Contains(string(pkg2Content), `"common"`) {
-		t.Errorf("pkg2 should see common, got: %s", pkg2Content)
+		t.Errorf("pkg2 should see Common, got: %s", pkg2Content)
 	}
 	if !strings.Contains(string(pkg2Content), `"pkg2-func"`) {
-		t.Errorf("pkg2 should see pkg2Func, got: %s", pkg2Content)
+		t.Errorf("pkg2 should see Pkg2Func, got: %s", pkg2Content)
 	}
-	// NEW: With depth-based resolution, pkg2 CAN see pkg1Func (same depth)
+	// NEW: With depth-based resolution, pkg2 CAN see Pkg1Func (same depth)
 	if !strings.Contains(string(pkg2Content), `"pkg1-func"`) {
-		t.Errorf("pkg2 should see pkg1Func (same depth), got: %s", pkg2Content)
+		t.Errorf("pkg2 should see Pkg1Func (same depth), got: %s", pkg2Content)
 	}
 }
 
@@ -358,7 +362,7 @@ func TestHierarchyDuplicateInSameDirectory(t *testing.T) {
 
 package main
 
-func duplicate() string { return "first" }
+func Duplicate() string { return "first" }
 `)
 
 	writeFile(t, dir, "helpers2.go", `//go:build exclude
@@ -366,12 +370,12 @@ func duplicate() string { return "first" }
 
 package main
 
-func duplicate() string { return "second" }
+func Duplicate() string { return "second" }
 `)
 
 	writeFile(t, dir, "main.go", `package main
 
-//:duplicate
+//:Duplicate
 var d = ""
 `)
 
@@ -393,9 +397,9 @@ func TestHierarchyMultipleFunctionsPerLevel(t *testing.T) {
 
 package main
 
-func rootA() string { return "root-a" }
-func rootB() int { return 100 }
-func rootC() bool { return true }
+func RootA() string { return "root-a" }
+func RootB() int { return 100 }
+func RootC() bool { return true }
 `)
 
 	// Sub with some overrides
@@ -404,23 +408,23 @@ func rootC() bool { return true }
 
 package main
 
-func rootB() int { return 200 }
-func subD() string { return "sub-d" }
+func RootB() int { return 200 }
+func SubD() string { return "sub-d" }
 `)
 
 	// Source using all functions
 	writeFile(t, dir, "sub/main.go", `package main
 
-//:rootA
+//:RootA
 var a = ""
 
-//:rootB
+//:RootB
 var b = 0
 
-//:rootC
+//:RootC
 var c = false
 
-//:subD
+//:SubD
 var d = ""
 `)
 
@@ -433,19 +437,19 @@ var d = ""
 	contentStr := string(content)
 
 	if !strings.Contains(contentStr, `"root-a"`) {
-		t.Errorf("Expected rootA from root, got: %s", contentStr)
+		t.Errorf("Expected RootA from root, got: %s", contentStr)
 	}
 	if !strings.Contains(contentStr, "200") {
-		t.Errorf("Expected rootB=200 from sub (shadowed), got: %s", contentStr)
+		t.Errorf("Expected RootB=200 from sub (shadowed), got: %s", contentStr)
 	}
 	if strings.Contains(contentStr, "100") {
-		t.Errorf("Should NOT have rootB=100 from root, got: %s", contentStr)
+		t.Errorf("Should NOT have RootB=100 from root, got: %s", contentStr)
 	}
 	if !strings.Contains(contentStr, "true") {
-		t.Errorf("Expected rootC=true from root, got: %s", contentStr)
+		t.Errorf("Expected RootC=true from root, got: %s", contentStr)
 	}
 	if !strings.Contains(contentStr, `"sub-d"`) {
-		t.Errorf("Expected subD from sub, got: %s", contentStr)
+		t.Errorf("Expected SubD from sub, got: %s", contentStr)
 	}
 }
 
@@ -459,13 +463,13 @@ func TestHierarchyWithStdlib(t *testing.T) {
 
 package main
 
-func userFunc() string { return "user-value" }
+func UserFunc() string { return "user-value" }
 `)
 
 	// Source using both user and stdlib
 	writeFile(t, dir, "main.go", `package main
 
-//:userFunc
+//:UserFunc
 var user = ""
 
 //:strings.ToUpper:"hello"
@@ -500,7 +504,7 @@ package main
 
 import "strings"
 
-func join(sep string, parts ...string) string {
+func Join(sep string, parts ...string) string {
 	return strings.Join(parts, sep)
 }
 `)
@@ -508,7 +512,7 @@ func join(sep string, parts ...string) string {
 	// Subdirectory using inherited variadic function
 	writeFile(t, dir, "sub/main.go", `package main
 
-//:join:"-":"a":"b":"c"
+//:Join:"-":"a":"b":"c"
 var result = ""
 `)
 

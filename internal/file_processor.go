@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	gotoken "go/token"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -25,15 +26,38 @@ func NewFileProcessor(ctx *ProcessorContext) *FileProcessor {
 
 // CollectAllGoFiles walks the directory tree once and collects all .go files
 // It also identifies function files and stores them in ctx.FuncFiles
+// Submodules (directories with their own go.mod) are detected and stored separately
 func (fp *FileProcessor) CollectAllGoFiles(dir string) ([]string, error) {
 	var allFiles []string
 	fp.ctx.FuncFiles = []string{}
+	fp.ctx.Submodules = []string{}
 
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	// Get absolute path of root dir to compare
+	absRootDir, err := filepath.Abs(dir)
+	if err != nil {
+		absRootDir = dir
+	}
+
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+
+		// Check for submodule (directory with go.mod that's not the root)
+		if d.IsDir() {
+			absPath, _ := filepath.Abs(path)
+			if absPath != absRootDir {
+				goModPath := filepath.Join(path, "go.mod")
+				if _, statErr := os.Stat(goModPath); statErr == nil {
+					// Found a submodule - record it and skip this directory tree
+					fp.ctx.Submodules = append(fp.ctx.Submodules, path)
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+
+		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 
@@ -104,7 +128,9 @@ func (fp *FileProcessor) fileHasMarkers(path string, commentRe, injectRe *regexp
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		_ = file.Close()
+	}(file)
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -181,6 +207,11 @@ func (fp *FileProcessor) processFunctionDeclaration(fn *ast.FuncDecl, filePath s
 
 	funcName := fn.Name.Name
 
+	// Only exported (uppercase) functions are available for placeholder replacement
+	if !gotoken.IsExported(funcName) {
+		return
+	}
+
 	// Get directory of the helper file
 	funcDir := filepath.Dir(filePath)
 	absDir, err := filepath.Abs(funcDir)
@@ -242,8 +273,16 @@ func (fp *FileProcessor) checkShadowing(funcName string, funcDepth int, filePath
 	for depth := 0; depth < funcDepth; depth++ {
 		if funcs, ok := fp.ctx.FunctionsByDepth[depth]; ok {
 			if existingFunc, exists := funcs[funcName]; exists {
-				_, _ = fmt.Fprintf(os.Stderr, "[goahead] WARNING: Function '%s' at depth %d (%s) shadows function at depth %d (%s)\n",
-					funcName, funcDepth, filePath, depth, existingFunc.FilePath)
+				relPath, _ := filepath.Rel(fp.ctx.RootDir, filePath)
+				existingRelPath, _ := filepath.Rel(fp.ctx.RootDir, existingFunc.FilePath)
+				if relPath == "" {
+					relPath = filePath
+				}
+				if existingRelPath == "" {
+					existingRelPath = existingFunc.FilePath
+				}
+				_, _ = fmt.Fprintf(os.Stderr, "[goahead] WARNING: '%s' at depth %d (%s) shadows depth %d (%s)\n",
+					funcName, funcDepth, relPath, depth, existingRelPath)
 				return
 			}
 		}

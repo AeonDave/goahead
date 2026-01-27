@@ -18,7 +18,7 @@ func TestSubcommandBuild(t *testing.T) {
 
 package main
 
-func getVersion() string { return "1.0.0" }
+func GetVersion() string { return "1.0.0" }
 `)
 
 	// Create main file with placeholder
@@ -26,7 +26,7 @@ func getVersion() string { return "1.0.0" }
 
 import "fmt"
 
-//:getVersion:
+//:GetVersion:
 var version = ""
 
 func main() {
@@ -74,13 +74,13 @@ func TestSubcommandBuildWithTags(t *testing.T) {
 
 package main
 
-func getMode() string { return "debug" }
+func GetMode() string { return "debug" }
 `)
 
 	// Create main file
 	writeFile(t, dir, "main.go", `package main
 
-//:getMode:
+//:GetMode:
 var mode = ""
 
 func main() {}
@@ -119,13 +119,13 @@ func TestSubcommandTest(t *testing.T) {
 
 package main
 
-func getTestValue() string { return "test-value" }
+func GetTestValue() string { return "test-value" }
 `)
 
 	// Create main file
 	writeFile(t, dir, "main.go", `package main
 
-//:getTestValue:
+//:GetTestValue:
 var testVal = ""
 `)
 
@@ -173,13 +173,13 @@ func TestSubcommandWithRecursivePattern(t *testing.T) {
 
 package helpers
 
-func rootFunc() string { return "root" }
+func RootFunc() string { return "root" }
 `)
 
 	// Create subpackage
 	writeFile(t, dir, "pkg/main.go", `package pkg
 
-//:rootFunc:
+//:RootFunc:
 var Val = ""
 `)
 

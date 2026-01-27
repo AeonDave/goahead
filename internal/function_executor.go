@@ -286,7 +286,12 @@ func (fe *FunctionExecutor) determineTarget(funcName string, sourceDir string) (
 
 	alias, remainder, ok := strings.Cut(funcName, ".")
 	if !ok || alias == "" || remainder == "" {
-		return callTarget{}, fmt.Errorf("function %s not found; define it in a //go:ahead functions file or reference it as package.Func", funcName)
+		// Provide helpful error message
+		// Check if it's a lowercase function (unexported)
+		if len(funcName) > 0 && funcName[0] >= 'a' && funcName[0] <= 'z' {
+			return callTarget{}, fmt.Errorf("function '%s' not found (note: only exported/uppercase functions are available)", funcName)
+		}
+		return callTarget{}, fmt.Errorf("function '%s' not found; define it in a //go:ahead functions file", funcName)
 	}
 
 	path, resolved := fe.resolveImportPath(alias)
@@ -461,7 +466,7 @@ func (fe *FunctionExecutor) buildProgramForDirBatch(targets []callTarget, callEx
 	return string(formatted), nil
 }
 
-// ensurePreparedForDir prepares code with only the functions visible from sourceDir
+// ensurePreparedForDir prepares code with only the declarations visible from sourceDir
 func (fe *FunctionExecutor) ensurePreparedForDir(sourceDir string) (*preparedCode, error) {
 	if prepared, ok := fe.preparedByDir[sourceDir]; ok {
 		return prepared, nil
@@ -472,14 +477,14 @@ func (fe *FunctionExecutor) ensurePreparedForDir(sourceDir string) (*preparedCod
 
 	var pieces []string
 	importSet := make(map[string]struct{})
-	seenFunctions := make(map[string]bool)
+	seenIdentifiers := make(map[string]bool)
 
 	// Process files in order from closest to furthest (local shadows global)
 	for _, file := range visibleFiles {
-		code, imports, funcs := fe.processFunctionFileWithNames(file)
+		code, imports, identifiers := fe.processFunctionFileWithNames(file)
 
-		// Filter out functions that are already defined (shadowed)
-		filteredCode := fe.filterShadowedFunctions(code, funcs, seenFunctions)
+		// Filter out declarations that are already defined (shadowed)
+		filteredCode := fe.filterShadowedDeclarations(code, identifiers, seenIdentifiers)
 
 		if filteredCode != "" {
 			pieces = append(pieces, filteredCode)
@@ -487,9 +492,9 @@ func (fe *FunctionExecutor) ensurePreparedForDir(sourceDir string) (*preparedCod
 		for spec := range imports {
 			importSet[spec] = struct{}{}
 		}
-		// Mark these functions as seen
-		for _, fn := range funcs {
-			seenFunctions[fn] = true
+		// Mark these identifiers as seen
+		for _, id := range identifiers {
+			seenIdentifiers[id] = true
 		}
 	}
 
@@ -546,12 +551,12 @@ func (fe *FunctionExecutor) buildHelperFilesByDepth() map[int][]string {
 	return depthToFiles
 }
 
-// filterShadowedFunctions removes function declarations that are already in seenFunctions
-func (fe *FunctionExecutor) filterShadowedFunctions(code string, funcs []string, seen map[string]bool) string {
+// filterShadowedDeclarations removes declarations (func/var/const/type) that are already in seenIdentifiers
+func (fe *FunctionExecutor) filterShadowedDeclarations(code string, identifiers []string, seen map[string]bool) string {
 	// Quick check: if no overlap, return original code
 	hasOverlap := false
-	for _, fn := range funcs {
-		if seen[fn] {
+	for _, id := range identifiers {
+		if seen[id] {
 			hasOverlap = true
 			break
 		}
@@ -560,42 +565,92 @@ func (fe *FunctionExecutor) filterShadowedFunctions(code string, funcs []string,
 		return code
 	}
 
-	// Need to filter - parse and remove shadowed functions
+	// Need to filter - parse and remove shadowed declarations
 	lines := strings.Split(code, "\n")
 	var result []string
-	inFunc := false
-	skipFunc := false
+	inBlock := false
+	skipBlock := false
 	braceCount := 0
+	parenCount := 0
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		if !inFunc {
-			// Check if this starts a function we should skip
+		if !inBlock {
+			// Check if this starts a declaration we should skip
 			if strings.HasPrefix(trimmed, "func ") {
-				// Extract function name
 				name := extractFuncName(trimmed)
 				if name != "" && seen[name] {
-					skipFunc = true
-					inFunc = true
+					skipBlock = true
+					inBlock = true
 					braceCount = strings.Count(line, "{") - strings.Count(line, "}")
 					continue
 				}
-				inFunc = true
+				inBlock = true
+				braceCount = strings.Count(line, "{") - strings.Count(line, "}")
+			} else if strings.HasPrefix(trimmed, "var ") {
+				names := extractVarNames(trimmed)
+				if namesOverlap(names, seen) {
+					skipBlock = true
+					inBlock = true
+					parenCount = strings.Count(line, "(") - strings.Count(line, ")")
+					braceCount = strings.Count(line, "{") - strings.Count(line, "}")
+					if parenCount == 0 && braceCount == 0 && !strings.HasSuffix(trimmed, "(") {
+						// Single-line var declaration
+						inBlock = false
+						skipBlock = false
+					}
+					continue
+				}
+				inBlock = true
+				parenCount = strings.Count(line, "(") - strings.Count(line, ")")
+				braceCount = strings.Count(line, "{") - strings.Count(line, "}")
+			} else if strings.HasPrefix(trimmed, "const ") {
+				names := extractConstNames(trimmed)
+				if namesOverlap(names, seen) {
+					skipBlock = true
+					inBlock = true
+					parenCount = strings.Count(line, "(") - strings.Count(line, ")")
+					if parenCount == 0 && !strings.HasSuffix(trimmed, "(") {
+						// Single-line const declaration
+						inBlock = false
+						skipBlock = false
+					}
+					continue
+				}
+				inBlock = true
+				parenCount = strings.Count(line, "(") - strings.Count(line, ")")
+			} else if strings.HasPrefix(trimmed, "type ") {
+				names := extractTypeNames(trimmed)
+				if namesOverlap(names, seen) {
+					skipBlock = true
+					inBlock = true
+					parenCount = strings.Count(line, "(") - strings.Count(line, ")")
+					braceCount = strings.Count(line, "{") - strings.Count(line, "}")
+					if parenCount == 0 && braceCount == 0 && !strings.HasSuffix(trimmed, "(") && !strings.HasSuffix(trimmed, "{") {
+						// Single-line type declaration
+						inBlock = false
+						skipBlock = false
+					}
+					continue
+				}
+				inBlock = true
+				parenCount = strings.Count(line, "(") - strings.Count(line, ")")
 				braceCount = strings.Count(line, "{") - strings.Count(line, "}")
 			}
 		} else {
 			braceCount += strings.Count(line, "{") - strings.Count(line, "}")
-			if braceCount <= 0 {
-				inFunc = false
-				if skipFunc {
-					skipFunc = false
+			parenCount += strings.Count(line, "(") - strings.Count(line, ")")
+			if braceCount <= 0 && parenCount <= 0 {
+				inBlock = false
+				if skipBlock {
+					skipBlock = false
 					continue
 				}
 			}
 		}
 
-		if !skipFunc {
+		if !skipBlock {
 			result = append(result, line)
 		}
 	}
@@ -613,6 +668,115 @@ func extractFuncName(line string) string {
 		return ""
 	}
 	return strings.TrimSpace(rest[:parenIdx])
+}
+
+// extractVarNames extracts variable names from a "var" declaration line
+// Handles: "var x int", "var x, y int", "var x = 1", "var ("
+func extractVarNames(line string) []string {
+	trimmed := strings.TrimSpace(line)
+	rest := strings.TrimPrefix(trimmed, "var ")
+	rest = strings.TrimSpace(rest)
+
+	// Check for block start
+	if rest == "(" || rest == "" {
+		return nil
+	}
+
+	// Find the end of the name(s) - could be space, =, or type
+	var names []string
+	// Split by comma for multiple names
+	if eqIdx := strings.Index(rest, "="); eqIdx != -1 {
+		rest = rest[:eqIdx]
+	}
+	// Remove type annotation
+	for _, sep := range []string{" int", " string", " bool", " float", " byte", " rune", " uint", " ["} {
+		if idx := strings.Index(rest, sep); idx != -1 {
+			rest = rest[:idx]
+			break
+		}
+	}
+	// Also handle custom types (anything after space)
+	if spaceIdx := strings.Index(rest, " "); spaceIdx != -1 {
+		rest = rest[:spaceIdx]
+	}
+
+	for _, name := range strings.Split(rest, ",") {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// extractConstNames extracts constant names from a "const" declaration line
+func extractConstNames(line string) []string {
+	trimmed := strings.TrimSpace(line)
+	rest := strings.TrimPrefix(trimmed, "const ")
+	rest = strings.TrimSpace(rest)
+
+	// Check for block start
+	if rest == "(" || rest == "" {
+		return nil
+	}
+
+	// Find the end of the name(s)
+	var names []string
+	if eqIdx := strings.Index(rest, "="); eqIdx != -1 {
+		rest = rest[:eqIdx]
+	}
+	// Remove type annotation
+	if spaceIdx := strings.Index(rest, " "); spaceIdx != -1 {
+		rest = rest[:spaceIdx]
+	}
+
+	for _, name := range strings.Split(rest, ",") {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// extractTypeNames extracts type names from a "type" declaration line
+// Handles: "type X struct", "type X = int", "type ("
+func extractTypeNames(line string) []string {
+	trimmed := strings.TrimSpace(line)
+	rest := strings.TrimPrefix(trimmed, "type ")
+	rest = strings.TrimSpace(rest)
+
+	// Check for block start
+	if rest == "(" || rest == "" {
+		return nil
+	}
+
+	// Find the type name (first identifier)
+	var name string
+	for i, r := range rest {
+		if r == ' ' || r == '=' || r == '[' {
+			name = rest[:i]
+			break
+		}
+	}
+	if name == "" {
+		name = rest
+	}
+	name = strings.TrimSpace(name)
+	if name != "" {
+		return []string{name}
+	}
+	return nil
+}
+
+// namesOverlap checks if any name in the list is in the seen map
+func namesOverlap(names []string, seen map[string]bool) bool {
+	for _, name := range names {
+		if seen[name] {
+			return true
+		}
+	}
+	return false
 }
 
 func (fe *FunctionExecutor) executeProgram(program string) (string, error) {
@@ -752,7 +916,8 @@ func (fe *FunctionExecutor) processFunctionFile(path string) (string, map[string
 	return strings.TrimSpace(builder.String()), imports
 }
 
-// processFunctionFileWithNames is like processFunctionFile but also returns function names
+// processFunctionFileWithNames is like processFunctionFile but also returns all identifier names
+// (functions, variables, constants, types) for proper shadowing support
 func (fe *FunctionExecutor) processFunctionFileWithNames(path string) (string, map[string]struct{}, []string) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -762,7 +927,7 @@ func (fe *FunctionExecutor) processFunctionFileWithNames(path string) (string, m
 	lines := strings.Split(string(content), "\n")
 	var builder strings.Builder
 	imports := make(map[string]struct{})
-	var funcNames []string
+	var identifiers []string
 
 	inBlock := false
 	inImportBlock := false
@@ -813,15 +978,43 @@ func (fe *FunctionExecutor) processFunctionFileWithNames(path string) (string, m
 				inBlock = true
 				braceCount = 0
 				funcName := extractFuncName(trimmed)
-				if funcName != "" {
-					funcNames = append(funcNames, funcName)
+				// Only include exported functions for placeholder usage
+				if funcName != "" && gotoken.IsExported(funcName) {
+					identifiers = append(identifiers, funcName)
 				}
-			} else if strings.HasPrefix(trimmed, "const ") ||
-				strings.HasPrefix(trimmed, "var ") ||
-				strings.HasPrefix(trimmed, "type ") {
+			} else if strings.HasPrefix(trimmed, "var ") {
 				inBlock = true
 				parenCount = 0
 				braceCount = 0
+				varNames := extractVarNames(trimmed)
+				// Only include exported variables
+				for _, name := range varNames {
+					if gotoken.IsExported(name) {
+						identifiers = append(identifiers, name)
+					}
+				}
+			} else if strings.HasPrefix(trimmed, "const ") {
+				inBlock = true
+				parenCount = 0
+				braceCount = 0
+				constNames := extractConstNames(trimmed)
+				// Only include exported constants
+				for _, name := range constNames {
+					if gotoken.IsExported(name) {
+						identifiers = append(identifiers, name)
+					}
+				}
+			} else if strings.HasPrefix(trimmed, "type ") {
+				inBlock = true
+				parenCount = 0
+				braceCount = 0
+				typeNames := extractTypeNames(trimmed)
+				// Only include exported types
+				for _, name := range typeNames {
+					if gotoken.IsExported(name) {
+						identifiers = append(identifiers, name)
+					}
+				}
 			}
 		}
 
@@ -853,7 +1046,7 @@ func (fe *FunctionExecutor) processFunctionFileWithNames(path string) (string, m
 		}
 	}
 
-	return strings.TrimSpace(builder.String()), imports, funcNames
+	return strings.TrimSpace(builder.String()), imports, identifiers
 }
 
 func splitArguments(input string) ([]string, error) {
