@@ -4,9 +4,18 @@ import (
 	"fmt"
 	"go/token"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
+
+// pathsEqual compares two paths for equality, handling case-insensitivity on Windows
+func pathsEqual(p1, p2 string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(p1, p2)
+	}
+	return p1 == p2
+}
 
 type UserFunction struct {
 	Name       string
@@ -47,7 +56,7 @@ func (ctx *ProcessorContext) CalculateDepth(dir string) int {
 	dirClean := filepath.Clean(dir)
 
 	// If same as root, depth is 0
-	if rootClean == dirClean {
+	if pathsEqual(rootClean, dirClean) {
 		return 0
 	}
 
@@ -63,14 +72,10 @@ func (ctx *ProcessorContext) CalculateDepth(dir string) int {
 		return 0
 	}
 
-	// Count separators + 1 for the final component
-	depth := 1
-	for _, c := range rel {
-		if c == filepath.Separator || c == '/' || c == '\\' {
-			depth++
-		}
-	}
-	return depth
+	// Split the relative path by separator to count depth levels
+	// This is more reliable than counting separator characters
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	return len(parts)
 }
 
 // ResolveFunction finds a function using depth-based resolution.

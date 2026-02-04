@@ -58,7 +58,7 @@ func RunCodegen(dir string, verbose bool) error {
 		// Always show submodules found (important info)
 		fmt.Printf("[goahead] Found %d submodule(s) to process separately:\n", len(ctx.Submodules))
 		for _, sub := range ctx.Submodules {
-			relPath, _ := filepath.Rel(dir, sub)
+			relPath, _ := filepath.Rel(ctx.RootDir, sub)
 			if relPath == "" {
 				relPath = sub
 			}
@@ -123,7 +123,7 @@ func RunCodegen(dir string, verbose bool) error {
 	// This happens AFTER the main project is done, so submodules are completely isolated
 	submodules := ctx.Submodules // Copy before ctx is garbage collected
 	for _, submodule := range submodules {
-		relPath, _ := filepath.Rel(dir, submodule)
+		relPath, _ := filepath.Rel(ctx.RootDir, submodule)
 		if relPath == "" {
 			relPath = submodule
 		}

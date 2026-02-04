@@ -37,6 +37,7 @@ func (fp *FileProcessor) CollectAllGoFiles(dir string) ([]string, error) {
 	if err != nil {
 		absRootDir = dir
 	}
+	absRootDir = filepath.Clean(absRootDir)
 
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -46,11 +47,12 @@ func (fp *FileProcessor) CollectAllGoFiles(dir string) ([]string, error) {
 		// Check for submodule (directory with go.mod that's not the root)
 		if d.IsDir() {
 			absPath, _ := filepath.Abs(path)
-			if absPath != absRootDir {
+			absPath = filepath.Clean(absPath)
+			if !pathsEqual(absPath, absRootDir) {
 				goModPath := filepath.Join(path, "go.mod")
 				if _, statErr := os.Stat(goModPath); statErr == nil {
 					// Found a submodule - record it and skip this directory tree
-					fp.ctx.Submodules = append(fp.ctx.Submodules, path)
+					fp.ctx.Submodules = append(fp.ctx.Submodules, absPath)
 					return filepath.SkipDir
 				}
 			}
