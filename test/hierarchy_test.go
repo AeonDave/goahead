@@ -217,8 +217,9 @@ var p = ""
 	}
 }
 
-// TestHierarchyNoInheritanceUpward tests that files "above" a helper don't see its functions
-func TestHierarchyNoInheritanceUpward(t *testing.T) {
+// TestHierarchyChildFunctionsVisibleFromRoot tests that files "above" a helper CAN see its functions
+// All helper functions are visible project-wide; depth only determines shadowing priority
+func TestHierarchyChildFunctionsVisibleFromRoot(t *testing.T) {
 	dir := t.TempDir()
 
 	// Helper only in subdirectory
@@ -230,14 +231,14 @@ package main
 func SubOnly() string { return "sub-only" }
 `)
 
-	// Source file in root trying to use subdirectory function (should fail)
+	// Source file in root using subdirectory function (should work)
 	writeFile(t, dir, "main.go", `package main
 
 //:SubOnly
 var s = ""
 `)
 
-	// Source file in subdirectory (should work)
+	// Source file in subdirectory (should also work)
 	writeFile(t, dir, "sub/main.go", `package main
 
 //:SubOnly
@@ -249,10 +250,10 @@ var s = ""
 		t.Fatalf("RunCodegen failed: %v", err)
 	}
 
-	// Root main.go should NOT have the replacement (function not found)
+	// Root main.go SHOULD have the replacement (all helpers visible project-wide)
 	rootContent, _ := os.ReadFile(filepath.Join(dir, "main.go"))
-	if strings.Contains(string(rootContent), `"sub-only"`) {
-		t.Errorf("Root should NOT see subdirectory function, but got: %s", rootContent)
+	if !strings.Contains(string(rootContent), `"sub-only"`) {
+		t.Errorf("Root should see subdirectory function, but got: %s", rootContent)
 	}
 
 	// Sub main.go SHOULD have the replacement

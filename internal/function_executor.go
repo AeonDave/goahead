@@ -507,8 +507,9 @@ func (fe *FunctionExecutor) ensurePreparedForDir(sourceDir string) (*preparedCod
 	return prepared, nil
 }
 
-// collectVisibleHelperFiles returns helper files visible from sourceDir using depth-based resolution
-// Files are ordered from deepest (closest to source) to shallowest (depth 0 = root)
+// collectVisibleHelperFiles returns helper files visible from sourceDir using depth-based resolution.
+// All project helper files are visible everywhere; depth determines shadowing priority.
+// Files are ordered: closest depth first (for shadowing), then deeper depths (lower priority).
 func (fe *FunctionExecutor) collectVisibleHelperFiles(sourceDir string) []string {
 	var result []string
 	absSourceDir, err := filepath.Abs(sourceDir)
@@ -523,9 +524,16 @@ func (fe *FunctionExecutor) collectVisibleHelperFiles(sourceDir string) []string
 		fe.helperFilesByDepth = depthToFiles
 	}
 
-	// Collect files from sourceDepth down to 0
-	// Order: deepest first (for shadowing to work correctly)
+	// Collect files from sourceDepth down to 0 (closest definitions take priority)
 	for depth := sourceDepth; depth >= 0; depth-- {
+		if files, ok := depthToFiles[depth]; ok {
+			result = append(result, files...)
+		}
+	}
+
+	// Also include files from deeper depths (available project-wide, lower priority)
+	maxDepth := fe.ctx.GetMaxDepth()
+	for depth := sourceDepth + 1; depth <= maxDepth; depth++ {
 		if files, ok := depthToFiles[depth]; ok {
 			result = append(result, files...)
 		}

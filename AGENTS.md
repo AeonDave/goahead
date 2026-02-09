@@ -42,25 +42,31 @@ goahead/
 
 ### Depth-Based Resolution
 
-**Purpose:** Allow different implementations of same symbol at different tree depths without conflicts.
+**Purpose:** Allow different implementations of same symbol at different tree depths without conflicts. All helper functions are visible project-wide; depth determines shadowing priority.
 
 **Algorithm:**
 ```
 sourceDepth = calculateDepth(sourceFile)
+// First: search from source depth down to root (closest wins)
 for depth = sourceDepth down to 0:
+    if symbol exists at depth:
+        return symbol
+// Then: search deeper depths (all helpers visible, lower priority)
+for depth = sourceDepth+1 up to maxDepth:
     if symbol exists at depth:
         return symbol
 ```
 
 **Rules:**
 - **Only exported symbols** (uppercase) are tracked/available for placeholders
+- All helper functions are visible from anywhere in the project
 - Same-depth symbols pool and share (siblings see each other)
-- Deeper shadows shallower (child overrides parent)
+- Closer depth takes priority (child overrides parent for files in child dir)
+- Root files can see subdirectory helpers (lower priority than root helpers)
 - Duplicate at same depth = FATAL
-- No upward inheritance (root can't see child-only symbols)
 
 **Implementation:** `internal/function_executor.go`:
-- `collectVisibleHelperFiles()` - gathers helpers from source depth to 0
+- `collectVisibleHelperFiles()` - gathers ALL helpers, ordered by priority (closest depth first)
 - `filterShadowedDeclarations()` - removes shadowed funcs/vars/consts/types
 - `processFunctionFileWithNames()` - extracts all **exported** identifiers using `token.IsExported()`
 

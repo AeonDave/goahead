@@ -79,13 +79,25 @@ func (ctx *ProcessorContext) CalculateDepth(dir string) int {
 }
 
 // ResolveFunction finds a function using depth-based resolution.
-// It searches from the source file's depth upward to depth 0.
+// It first searches from the source file's depth down to depth 0 (closest wins).
+// If not found, it searches deeper depths so all project helpers are visible.
 // Returns the function and the helper file path it came from.
 func (ctx *ProcessorContext) ResolveFunction(name, sourceDir string) (*UserFunction, string) {
 	sourceDepth := ctx.CalculateDepth(sourceDir)
 
-	// Search from sourceDepth down to 0
+	// Search from sourceDepth down to 0 (closest definitions take priority)
 	for depth := sourceDepth; depth >= 0; depth-- {
+		if funcs, ok := ctx.FunctionsByDepth[depth]; ok {
+			if fn, ok := funcs[name]; ok {
+				return fn, fn.FilePath
+			}
+		}
+	}
+
+	// Also search deeper depths (functions defined in subdirectories)
+	// These are available project-wide but with lower priority
+	maxDepth := ctx.GetMaxDepth()
+	for depth := sourceDepth + 1; depth <= maxDepth; depth++ {
 		if funcs, ok := ctx.FunctionsByDepth[depth]; ok {
 			if fn, ok := funcs[name]; ok {
 				return fn, fn.FilePath

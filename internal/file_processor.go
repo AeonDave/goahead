@@ -37,7 +37,6 @@ func (fp *FileProcessor) CollectAllGoFiles(dir string) ([]string, error) {
 	if err != nil {
 		absRootDir = dir
 	}
-	absRootDir = filepath.Clean(absRootDir)
 
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -47,8 +46,7 @@ func (fp *FileProcessor) CollectAllGoFiles(dir string) ([]string, error) {
 		// Check for submodule (directory with go.mod that's not the root)
 		if d.IsDir() {
 			absPath, _ := filepath.Abs(path)
-			absPath = filepath.Clean(absPath)
-			if !pathsEqual(absPath, absRootDir) {
+			if absPath != absRootDir {
 				goModPath := filepath.Join(path, "go.mod")
 				if _, statErr := os.Stat(goModPath); statErr == nil {
 					// Found a submodule - record it and skip this directory tree
@@ -63,7 +61,9 @@ func (fp *FileProcessor) CollectAllGoFiles(dir string) ([]string, error) {
 			return nil
 		}
 
-		// Check if it's a function file (fast check - reads only first 10 lines)
+		// Function files (//go:ahead functions) are sources of helper functions,
+		// not targets for placeholder/injection processing.
+		// They go into FuncFiles only; all other .go files go into allFiles.
 		if fp.hasFunctionMarker(path) {
 			fp.ctx.FuncFiles = append(fp.ctx.FuncFiles, path)
 		} else {
