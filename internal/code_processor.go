@@ -25,10 +25,10 @@ type placeholder struct {
 var (
 	assignmentPattern      = regexp.MustCompile(`^\s*(var\s+\w+(\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*`)
 	assignmentSplitPattern = regexp.MustCompile(`^(\s*(?:var\s+\w+(?:\s+[\w.\[\]]+)?\s*=|[\w.,\s]+\s*:=|[\w.]+\s*=)\s*)(.*)$`)
-	stringLiteralPattern   = regexp.MustCompile(`""`)
-	numericZeroPattern     = regexp.MustCompile(`\b0\b`)
-	floatZeroPattern       = regexp.MustCompile(`\b0\.0\b`)
-	boolFalsePattern       = regexp.MustCompile(`\bfalse\b`)
+	stringLiteralPattern   = regexp.MustCompile(`"[^"]*"` + "|`[^`]*`")
+	numericZeroPattern     = regexp.MustCompile(`\b\d+\b`)
+	floatZeroPattern       = regexp.MustCompile(`\b\d+\.\d+\b`)
+	boolFalsePattern       = regexp.MustCompile(`\b(?:true|false)\b`)
 	errNoReplacement       = errors.New("no replacement performed")
 )
 
@@ -237,6 +237,14 @@ func (cp *CodeProcessor) buildReplacementLine(originalLine, leadingWhitespace, f
 		return replacedLine, true, nil
 	}
 
+	// Try to replace literal placeholder in-place (e.g., in array: `"",` → `"newval",`)
+	trimmed := strings.TrimSpace(originalLine)
+	if replaced, ok := cp.replaceFirstPlaceholder(trimmed, formattedResult, typeHint); ok {
+		newLine := leadingWhitespace + replaced
+		return newLine, newLine != originalLine, nil
+	}
+
+	// Fallback: replace entire line content
 	newLine := leadingWhitespace + formattedResult
 	return newLine, newLine != originalLine, nil
 }

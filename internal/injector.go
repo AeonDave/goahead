@@ -22,11 +22,13 @@ const injectBlockEnd = "// End of goahead generated code."
 
 // InjectionResult contains the extracted function and its dependencies
 type InjectionResult struct {
-	FunctionCode string
-	Imports      []string
-	Constants    string
-	Variables    string
-	Types        string
+	FunctionCode  string
+	FunctionDecls map[string]string // Individual function declarations keyed by name
+	DepDecls      map[string]string // Individual dependency declarations (const/var/type) keyed by name
+	Imports       []string
+	Constants     string
+	Variables     string
+	Types         string
 }
 
 // Injector handles function injection from helper files
@@ -130,10 +132,12 @@ func (inj *Injector) ProcessFileInjections(filePath string, verbose bool) error 
 		return nil
 	}
 
-	// Extract functions and build injection content
+	// Extract functions and build injection content, deduplicating shared dependencies
 	var importsToAdd []string
 	var depsToAdd []string
 	var funcsToAdd []string
+	seenFuncs := make(map[string]bool)
+	seenDeps := make(map[string]bool)
 
 	for _, req := range requests {
 		result, err := inj.ExtractFunction(req.methodName, absSourceDir)
@@ -144,17 +148,41 @@ func (inj *Injector) ProcessFileInjections(filePath string, verbose bool) error 
 
 		importsToAdd = append(importsToAdd, result.Imports...)
 
-		if result.Types != "" {
-			depsToAdd = append(depsToAdd, result.Types)
+		// Deduplicate dependency declarations (const/var/type) across requests
+		var depNames []string
+		for name := range result.DepDecls {
+			depNames = append(depNames, name)
 		}
-		if result.Constants != "" {
-			depsToAdd = append(depsToAdd, result.Constants)
-		}
-		if result.Variables != "" {
-			depsToAdd = append(depsToAdd, result.Variables)
+		sort.Strings(depNames)
+		for _, name := range depNames {
+			if !seenDeps[name] {
+				seenDeps[name] = true
+				depsToAdd = append(depsToAdd, result.DepDecls[name])
+			}
 		}
 
-		funcsToAdd = append(funcsToAdd, result.FunctionCode)
+		// Deduplicate function declarations across requests
+		// Add the target function first, then its dependencies in sorted order
+		if !seenFuncs[req.methodName] {
+			seenFuncs[req.methodName] = true
+			if code, ok := result.FunctionDecls[req.methodName]; ok {
+				funcsToAdd = append(funcsToAdd, code)
+			}
+		}
+		var depFuncNames []string
+		for name := range result.FunctionDecls {
+			if name == req.methodName {
+				continue
+			}
+			depFuncNames = append(depFuncNames, name)
+		}
+		sort.Strings(depFuncNames)
+		for _, name := range depFuncNames {
+			if !seenFuncs[name] {
+				seenFuncs[name] = true
+				funcsToAdd = append(funcsToAdd, result.FunctionDecls[name])
+			}
+		}
 
 		if verbose {
 			fmt.Fprintf(os.Stderr, "[goahead] Injected method '%s' for interface '%s' in %s\n",
@@ -357,15 +385,24 @@ func (inj *Injector) ExtractFunction(funcName, sourceDir string) (*InjectionResu
 	}
 
 	// Extract dependencies (const, var, type) that are used
-	result.Constants, result.Variables, result.Types = inj.extractDependencies(node, fset, usedIdents)
+	result.DepDecls = inj.extractDependencyDecls(node, fset, usedIdents)
 
-	// Build function code: target first, then other dependencies (stable order)
+	// Build individual function declarations for deduplication across injection requests
+	result.FunctionDecls = make(map[string]string)
+	for name, fn := range included {
+		var buf strings.Builder
+		if err := printer.Fprint(&buf, fset, fn); err != nil {
+			return nil, fmt.Errorf("failed to print function '%s': %v", name, err)
+		}
+		result.FunctionDecls[name] = buf.String()
+	}
+
+	// Build concatenated function code (target first, then dependencies sorted)
 	var funcBuf strings.Builder
 	if err := printer.Fprint(&funcBuf, fset, funcDecl); err != nil {
 		return nil, fmt.Errorf("failed to print function: %v", err)
 	}
 
-	// Add dependent helper functions (excluding target), sorted for stability
 	var otherNames []string
 	for name := range included {
 		if name == funcName {
@@ -420,7 +457,28 @@ func (inj *Injector) collectUsedIdentifiers(fn *ast.FuncDecl) map[string]bool {
 
 // extractDependencies extracts const/var/type declarations used by the function
 func (inj *Injector) extractDependencies(file *ast.File, fset *token.FileSet, usedIdents map[string]bool) (constants, variables, types string) {
+	depDecls := inj.extractDependencyDecls(file, fset, usedIdents)
 	var constBuf, varBuf, typeBuf strings.Builder
+	for name, code := range depDecls {
+		// Classify by prefix to maintain backward compatibility
+		if strings.HasPrefix(code, "const ") {
+			constBuf.WriteString(code)
+			constBuf.WriteString("\n")
+		} else if strings.HasPrefix(code, "var ") {
+			varBuf.WriteString(code)
+			varBuf.WriteString("\n")
+		} else if strings.HasPrefix(code, "type ") {
+			typeBuf.WriteString(code)
+			typeBuf.WriteString("\n")
+		}
+		_ = name // used as key for deduplication
+	}
+	return constBuf.String(), varBuf.String(), typeBuf.String()
+}
+
+// extractDependencyDecls extracts const/var/type declarations as a map keyed by name for deduplication
+func (inj *Injector) extractDependencyDecls(file *ast.File, fset *token.FileSet, usedIdents map[string]bool) map[string]string {
+	result := make(map[string]string)
 
 	for _, decl := range file.Decls {
 		genDecl, ok := decl.(*ast.GenDecl)
@@ -439,8 +497,7 @@ func (inj *Injector) extractDependencies(file *ast.File, fset *token.FileSet, us
 							Tok:   token.CONST,
 							Specs: []ast.Spec{vs},
 						})
-						constBuf.WriteString(buf.String())
-						constBuf.WriteString("\n")
+						result[name.Name] = buf.String()
 						break
 					}
 				}
@@ -455,8 +512,7 @@ func (inj *Injector) extractDependencies(file *ast.File, fset *token.FileSet, us
 							Tok:   token.VAR,
 							Specs: []ast.Spec{vs},
 						})
-						varBuf.WriteString(buf.String())
-						varBuf.WriteString("\n")
+						result[name.Name] = buf.String()
 						break
 					}
 				}
@@ -470,14 +526,13 @@ func (inj *Injector) extractDependencies(file *ast.File, fset *token.FileSet, us
 						Tok:   token.TYPE,
 						Specs: []ast.Spec{ts},
 					})
-					typeBuf.WriteString(buf.String())
-					typeBuf.WriteString("\n")
+					result[ts.Name.Name] = buf.String()
 				}
 			}
 		}
 	}
 
-	return constBuf.String(), varBuf.String(), typeBuf.String()
+	return result
 }
 
 // insertImportsAndDeps adds imports and dependencies to the file content

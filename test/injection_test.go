@@ -1265,3 +1265,103 @@ go 1.22
 		verifyCompiles(t, dir)
 	}
 }
+
+// TestInjectionSharedDependenciesNoDuplicates tests that multiple injected functions
+// sharing the same dependencies do NOT produce duplicate function declarations.
+func TestInjectionSharedDependenciesNoDuplicates(t *testing.T) {
+	dir := t.TempDir()
+
+	// Helper with multiple exported functions that share unexported dependencies
+	writeFile(t, dir, "helpers.go", `//go:build exclude
+//go:ahead functions
+
+package main
+
+// Shared unexported helper used by multiple exported functions
+func transformData(data []byte) []byte {
+	result := make([]byte, len(data))
+	for i, b := range data {
+		result[i] = b ^ 0x42
+	}
+	return result
+}
+
+// Another shared unexported helper
+func validateInput(s string) bool {
+	return len(s) > 0
+}
+
+// EncodeStr uses transformData and validateInput
+func EncodeStr(s string) string {
+	if !validateInput(s) {
+		return ""
+	}
+	return string(transformData([]byte(s)))
+}
+
+// DecodeStr uses transformData and validateInput (same deps as EncodeStr)
+func DecodeStr(s string) string {
+	if !validateInput(s) {
+		return ""
+	}
+	return string(transformData([]byte(s)))
+}
+
+// RoundTrip uses EncodeStr and DecodeStr (transitive shared deps)
+func RoundTrip(s string) string {
+	return DecodeStr(EncodeStr(s))
+}
+`)
+
+	writeFile(t, dir, "main.go", `package main
+
+//:inject:EncodeStr
+//:inject:DecodeStr
+//:inject:RoundTrip
+type Codec interface {
+	EncodeStr(s string) string
+	DecodeStr(s string) string
+	RoundTrip(s string) string
+}
+
+func main() {
+	_ = EncodeStr("test")
+	_ = DecodeStr("test")
+	_ = RoundTrip("test")
+}
+`)
+
+	writeFile(t, dir, "go.mod", `module testmod
+go 1.22
+`)
+
+	err := internal.RunCodegen(dir, false)
+	if err != nil {
+		t.Fatalf("RunCodegen failed: %v", err)
+	}
+
+	content, _ := os.ReadFile(filepath.Join(dir, "main.go"))
+	contentStr := string(content)
+
+	// Each function must appear exactly once
+	if count := strings.Count(contentStr, "func EncodeStr("); count != 1 {
+		t.Errorf("Expected exactly 1 EncodeStr declaration, got %d", count)
+	}
+	if count := strings.Count(contentStr, "func DecodeStr("); count != 1 {
+		t.Errorf("Expected exactly 1 DecodeStr declaration, got %d", count)
+	}
+	if count := strings.Count(contentStr, "func RoundTrip("); count != 1 {
+		t.Errorf("Expected exactly 1 RoundTrip declaration, got %d", count)
+	}
+
+	// Shared dependencies must also appear exactly once
+	if count := strings.Count(contentStr, "func transformData("); count != 1 {
+		t.Errorf("Expected exactly 1 transformData declaration, got %d", count)
+	}
+	if count := strings.Count(contentStr, "func validateInput("); count != 1 {
+		t.Errorf("Expected exactly 1 validateInput declaration, got %d", count)
+	}
+
+	// Must compile
+	verifyCompiles(t, dir)
+}
