@@ -54,13 +54,11 @@ func (inj *Injector) ProcessFileInjections(filePath string, verbose bool) error 
 	absSourceDir, _ := filepath.Abs(sourceDir)
 
 	injectRe := regexp.MustCompile(InjectPattern)
-	lines := strings.Split(string(content), "\n")
 
-	// Remove any previously injected blocks to avoid duplication on subsequent runs
-	lines, err = inj.removeInjectedBlocks(lines)
-	if err != nil {
-		return err
-	}
+	// Normalize to \n for scanning and rewriting; we'll write back with \n.
+	// (CRLF preservation is handled by git/core.autocrlf or repo settings; Go compiler accepts both.)
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
 
 	// First pass: find all inject markers and their associated interfaces
 	type injectRequest struct {
@@ -197,26 +195,105 @@ func (inj *Injector) ProcessFileInjections(filePath string, verbose bool) error 
 	// 4. Add functions at end of file
 
 	// Insert imports only (dependencies will be appended in the injected block)
-	finalContent := inj.insertImportsAndDeps(lines, importsToAdd, nil)
+	baseContent := inj.insertImportsAndDeps(lines, importsToAdd, nil)
 
-	// Append injected block at end (deps + functions)
-	finalContent = strings.TrimRight(finalContent, "\n") + "\n"
-	finalContent += "\n" + injectBlockStart + "\n"
+	// Build injected block (deps + functions). Keep boundaries stable:
+	// - Start at injectBlockStart
+	// - No blank line immediately before injectBlockEnd
+	// - Always one blank line after injectBlockEnd
+	block := inj.buildInjectedBlock(depsToAdd, funcsToAdd)
+
+	finalContent, err := inj.replaceOrAppendInjectedBlock(baseContent, block)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filePath, []byte(finalContent), 0o644)
+}
+
+func (inj *Injector) buildInjectedBlock(depsToAdd []string, funcsToAdd []string) string {
+	var b strings.Builder
+	b.WriteString(injectBlockStart)
+	b.WriteString("\n")
 
 	for _, dep := range depsToAdd {
 		trimmed := strings.TrimSpace(dep)
-		if trimmed != "" {
-			finalContent += trimmed + "\n"
+		if trimmed == "" {
+			continue
 		}
+		b.WriteString(trimmed)
+		b.WriteString("\n")
 	}
 
 	for _, fn := range funcsToAdd {
-		finalContent += "\n" + fn + "\n"
+		trimmed := strings.TrimSpace(fn)
+		if trimmed == "" {
+			continue
+		}
+		b.WriteString("\n")
+		b.WriteString(trimmed)
+		b.WriteString("\n")
 	}
 
-	finalContent += injectBlockEnd + "\n"
+	b.WriteString(injectBlockEnd)
+	b.WriteString("\n")
+	// Always leave one empty line after the end marker
+	b.WriteString("\n")
+	return b.String()
+}
 
-	return os.WriteFile(filePath, []byte(finalContent), 0o644)
+func (inj *Injector) replaceOrAppendInjectedBlock(content string, block string) (string, error) {
+	startIdx := strings.Index(content, injectBlockStart)
+	if startIdx == -1 {
+		// No existing block: append at EOF with one blank line separation.
+		trimmed := strings.TrimRight(content, "\n")
+		if trimmed == "" {
+			return block, nil
+		}
+		return trimmed + "\n\n" + block, nil
+	}
+
+	endRel := strings.Index(content[startIdx:], injectBlockEnd)
+	if endRel == -1 {
+		return "", fmt.Errorf("unclosed injected block in file")
+	}
+	endIdx := startIdx + endRel + len(injectBlockEnd)
+
+	// Drop any blank lines immediately after the old end marker; the new block will add exactly one.
+	remainder := content[endIdx:]
+	remainder = trimLeadingBlankLines(remainder)
+
+	return content[:startIdx] + block + remainder, nil
+}
+
+func trimLeadingBlankLines(s string) string {
+	// Remove leading newlines and whitespace-only blank lines, but stop before indentation
+	// of a non-empty line (to avoid eating leading spaces of real code).
+	pos := 0
+	for {
+		// Consume exactly one newline if present
+		if pos >= len(s) {
+			return ""
+		}
+		if s[pos] != '\n' {
+			return s[pos:]
+		}
+		pos++ // consumed newline, now at start of line
+
+		lineStart := pos
+		for pos < len(s) && (s[pos] == ' ' || s[pos] == '\t') {
+			pos++
+		}
+		if pos >= len(s) {
+			return ""
+		}
+		if s[pos] == '\n' {
+			// whitespace-only line; keep trimming
+			continue
+		}
+		// Non-empty line: keep its indentation
+		return s[lineStart:]
+	}
 }
 
 // parseInterfaceMethods extracts method names from an interface declaration
@@ -253,43 +330,6 @@ func (inj *Injector) parseInterfaceMethods(lines []string, startIdx int) map[str
 	}
 
 	return methods
-}
-
-// removeExistingFunctions removes function declarations that match the given names
-// removeInjectedBlocks removes previously injected blocks to avoid duplication
-func (inj *Injector) removeInjectedBlocks(lines []string) ([]string, error) {
-	var result []string
-	i := 0
-
-	for i < len(lines) {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed == injectBlockStart {
-			// Skip until end marker
-			foundEnd := false
-			i++
-			for i < len(lines) {
-				if strings.TrimSpace(lines[i]) == injectBlockEnd {
-					foundEnd = true
-					i++
-					break
-				}
-				i++
-			}
-			if !foundEnd {
-				return nil, fmt.Errorf("unclosed injected block in file")
-			}
-			// Skip any trailing empty lines after the block
-			for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
-				i++
-			}
-			continue
-		}
-
-		result = append(result, lines[i])
-		i++
-	}
-
-	return result, nil
 }
 
 // ExtractFunction extracts a function and its dependencies from helper files
