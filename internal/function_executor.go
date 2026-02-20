@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"go/format"
@@ -795,12 +796,47 @@ func (fe *FunctionExecutor) executeProgram(program string) (string, error) {
 
 	cmd := exec.Command("go", "run", tempFile)
 	cmd.Env = sanitizeGoEnv(os.Environ())
-	output, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	stdoutStr := stdout.String()
+	stderrStr := stderr.String()
+
 	if err != nil {
-		return "", fmt.Errorf("failed to execute temp program: %v\nOutput:\n%s", err, string(output))
+		// On Windows, "go run" may fail to clean up temp executables
+		// (e.g. "go: unlinkat ... Access is denied.") causing a non-zero
+		// exit even though the program itself executed successfully.
+		// If the only stderr content is cleanup errors, use stdout.
+		if stdoutStr != "" && IsGoCleanupError(stderrStr) {
+			return strings.TrimSpace(stdoutStr), nil
+		}
+		return "", fmt.Errorf("failed to execute temp program: %v\nOutput:\n%s%s", err, stdoutStr, stderrStr)
 	}
 
-	return strings.TrimSpace(string(output)), nil
+	return strings.TrimSpace(stdoutStr), nil
+}
+
+// IsGoCleanupError returns true when every non-blank line in stderr is a
+// Go toolchain file-cleanup message (e.g. "go: unlinkat … Access is denied."
+// or "go: removing … Access is denied.").  These arise on Windows when
+// antivirus or filesystem locks prevent deletion of temp build artefacts
+// and are harmless when the program itself already produced its output.
+func IsGoCleanupError(stderr string) bool {
+	if strings.TrimSpace(stderr) == "" {
+		return false
+	}
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "go: unlinkat") || strings.HasPrefix(line, "go: removing") {
+			continue
+		}
+		return false // non-cleanup error present
+	}
+	return true
 }
 
 func splitOutputLines(output string) []string {
